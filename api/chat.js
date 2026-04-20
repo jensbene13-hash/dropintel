@@ -4,7 +4,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-api-key');
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
   try {
-    const { messages, system, model, max_tokens } = req.body;
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const { messages, system, model, max_tokens } = body;
     const apiKey = req.headers['x-api-key'];
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
