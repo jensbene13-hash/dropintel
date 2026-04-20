@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DropIntel</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; color: #e0e0e0; font-family: 'Courier New', monospace; min-height: 100vh; }
+header { background: linear-gradient(135deg, #0d0d1a, #1a0d2e, #0d1a0d); border-bottom: 1px solid #00e5a020; padding: 16px 20px; position: sticky; top: 0; z-index: 100; }
+.header-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.logo span:first-child { color: #00e5a0; font-size: 22px; font-weight: 900; }
+.logo span:last-child { color: #ff4d4d; font-size: 22px; font-weight: 900; }
+.live-badge { background: #ff4d4d; color: #fff; font-size: 9px; padding: 2px 6px; border-radius: 2px; letter-spacing: 2px; margin-left: 8px; }
+.subtitle { color: #444; font-size: 9px; letter-spacing: 1px; margin-top: 2px; }
+.header-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn-key { background: #111; color: #555; border: 1px solid #222; padding: 7px 12px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; }
+.btn-refresh { background: linear-gradient(135deg, #00e5a0, #00b37a); color: #000; border: none; padding: 7px 18px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 10px; letter-spacing: 2px; }
+.btn-refresh:disabled { background: #1a1a2e; color: #444; cursor: not-allowed; }
+main { max-width: 1100px; margin: 0 auto; padding: 20px 14px; }
+.api-box { background: #0d0d16; border: 1px solid #00e5a020; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
+.api-label { color: #00e5a0; font-size: 10px; letter-spacing: 3px; margin-bottom: 8px; }
+.api-desc { color: #444; font-size: 11px; margin-bottom: 14px; line-height: 1.7; }
+.api-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.api-input { flex: 1; min-width: 180px; background: #0a0a0a; border: 1px solid #00e5a030; border-radius: 3px; padding: 10px 14px; color: #e0e0e0; font-family: 'Courier New', monospace; font-size: 12px; outline: none; }
+.btn-connect { background: linear-gradient(135deg, #00e5a0, #00b37a); color: #000; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 10px; letter-spacing: 2px; }
+.error-box { background: #1a0d0d; border: 1px solid #ff4d4d30; border-radius: 4px; padding: 14px; margin-bottom: 16px; color: #ff4d4d; font-size: 11px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 20px; }
+.stat-card { background: #111118; border-radius: 4px; padding: 12px 14px; }
+.stat-val { font-size: 20px; font-weight: 900; }
+.stat-label { font-size: 8px; letter-spacing: 2px; margin-top: 3px; color: #333; }
+.filters { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.filter-btn { background: #111118; color: #555; border: 1px solid #222; padding: 5px 10px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; }
+.filter-btn.active { background: #00e5a0; color: #000; border-color: #00e5a0; font-weight: 700; }
+.loading { text-align: center; padding: 70px 0; }
+.loading-text { color: #00e5a0; font-size: 11px; letter-spacing: 4px; margin-bottom: 14px; }
+.dots { display: flex; justify-content: center; gap: 6px; }
+.dot { width: 6px; height: 6px; background: #00e5a0; border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:0.2;transform:scale(1)} 50%{opacity:1;transform:scale(1.4)} }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.card { background: #0e0e16; border: 1px solid #1a1a2e; border-radius: 4px; padding: 16px; cursor: pointer; transition: all 0.2s; position: relative; overflow: hidden; }
+.card.active { background: #111a11; border-color: #00e5a040; }
+.trend-bar { position: absolute; top: 0; left: 0; height: 2px; }
+.cat-tag { background: #1a1a2e; color: #333; font-size: 8px; padding: 2px 6px; border-radius: 2px; letter-spacing: 1px; }
+.card-title { font-size: 13px; font-weight: 700; margin: 8px 0 6px; line-height: 1.3; }
+.card-why { font-size: 10px; color: #444; margin-bottom: 12px; line-height: 1.5; }
+.prices { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-bottom: 10px; text-align: center; }
+.price-val { font-size: 12px; font-weight: 700; }
+.price-label { font-size: 8px; color: #333; letter-spacing: 1px; margin-top: 2px; }
+.card-footer { display: flex; justify-content: space-between; align-items: center; }
+.platform-tag { background: #1a1a2e; color: #333; font-size: 8px; padding: 2px 5px; border-radius: 2px; margin-right: 4px; }
+.score-bar { width: 26px; height: 3px; background: #1a1a2e; border-radius: 2px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 3px; }
+.score-fill { height: 100%; border-radius: 2px; }
+.score-num { font-size: 11px; font-weight: 700; vertical-align: middle; }
+.card-expand { margin-top: 12px; padding-top: 12px; border-top: 1px solid #1a1a2e; }
+.expand-label { color: #333; font-size: 8px; letter-spacing: 2px; margin-bottom: 4px; }
+.expand-val { color: #aaa; font-size: 11px; }
+.demand-badge { display: inline-block; font-size: 8px; padding: 3px 8px; border-radius: 2px; letter-spacing: 2px; margin-top: 8px; }
+.empty { text-align: center; padding: 60px 0; color: #1a1a1a; font-size: 11px; letter-spacing: 3px; }
+footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; letter-spacing: 2px; padding-bottom: 20px; }
+</style>
+</head>
+<body>
+<header>
+<div class="header-inner">
+<div>
+<div class="logo"><span>DROP</span><span>INTEL</span><span class="live-badge">LIVE</span></div>
+<div class="subtitle">AI-POWERED PRODUCT INTELLIGENCE</div>
+</div>
+<div class="header-btns">
+<span id="lastUpdated" style="color:#333;font-size:9px;letter-spacing:1px"></span>
+<button class="btn-key" onclick="toggleKey()">🔑 API KEY</button>
+<button class="btn-refresh" id="refreshBtn" onclick="fetchProducts()" disabled>↻ REFRESH</button>
+</div>
+</div>
+</header>
+<main>
+<div class="api-box" id="apiBox">
+<div class="api-label">🔑 CONNECT AI ENGINE</div>
+<div class="api-desc">Get your free API key at console.anthropic.com → API Keys → Create Key</div>
+<div class="api-row">
+<input class="api-input" type="password" id="apiInput" placeholder="sk-ant-api03-..." onkeydown="if(event.key==='Enter')saveKey()">
+<button class="btn-connect" onclick="saveKey()">CONNECT →</button>
+</div>
+<div style="color:#1a1a1a;font-size:9px;margin-top:10px">🔒 STAYS IN YOUR BROWSER ONLY</div>
+</div>
+<div class="error-box" id="errorBox" style="display:none"></div>
+<div id="stats"></div>
+<div class="filters" id="filters" style="display:none"></div>
+<div class="loading" id="loading" style="display:none">
+<div class="loading-text">SCANNING MARKET TRENDS...</div>
+<div class="dots">
+<div class="dot" style="animation-delay:0s"></div>
+<div class="dot" style="animation-delay:0.2s"></div>
+<div class="dot" style="animation-delay:0.4s"></div>
+<div class="dot" style="animation-delay:0.6s"></div>
+<div class="dot" style="animation-delay:0.8s"></div>
+</div>
+</div>
+<div class="empty" id="empty">ENTER YOUR API KEY ABOVE TO GET STARTED</div>
+<div class="grid" id="grid"></div>
+<footer>DROPINTEL • AI-POWERED • REFRESH DAILY</footer>
+</main>
+<script>
+let savedKey='',allProducts=[],activeCategory='All',activeCard=null;
+const CATS=['All','Home & Kitchen','Beauty & Personal Care','Tech & Gadgets','Fitness & Sports','Pet Supplies','Fashion & Accessories','Kids & Toys'];
+function toggleKey(){const b=document.getElementById('apiBox');b.style.display=b.style.display==='none'?'block':'none';}
+function saveKey(){const k=document.getElementById('apiInput').value.trim();if(!k.startsWith('sk-ant-')){showError('Invalid key. Should start with sk-ant-');return;}savedKey=k;document.getElementById('apiBox').style.display='none';document.getElementById('refreshBtn').disabled=false;clearError();fetchProducts();}
+function showError(m){const b=document.getElementById('errorBox');b.textContent='⚠️ '+m;b.style.display='block';}
+function clearError(){document.getElementById('errorBox').style.display='none';}
+function tc(t){return t==='hot'?'#ff4d4d':t==='rising'?'#00e5a0':'#ffd700';}
+function te(t){return t==='hot'?'🔥':t==='rising'?'📈':'➡️';}
+async function fetchProducts(){
+if(!savedKey)return;
+document.getElementById('loading').style.display='block';
+document.getElementById('grid').innerHTML='';
+document.getElementById('empty').style.display='none';
+document.getElementById('stats').innerHTML='';
+document.getElementById('filters').style.display='none';
+document.getElementById('refreshBtn').disabled=true;
+clearError();
+const today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+try{
+const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':savedKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:1000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown. Each object: id, name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array). Return exactly 12 products.',messages:[{role:'user',content:'Today is '+today+'. Give me 12 trending dropshipping products with high profit margins.'}]})});
+const data=await res.json();
+if(data.error){showError(data.error.message);return;}
+const text=data.content.map(b=>b.text||'').join('').replace(/```json|```/g,'').trim();
+allProducts=JSON.parse(text);
+document.getElementById('lastUpdated').textContent='UPDATED '+new Date().toLocaleTimeString();
+renderStats();renderFilters();renderGrid();
+}catch(e){showError('Failed to load. Check your API key and try again.');}
+finally{document.getElementById('loading').style.display='none';document.getElementById('refreshBtn').disabled=false;}
+}
+function renderStats(){document.getElementById('stats').innerHTML='<div class="stats"><div class="stat-card"><div class="stat-val" style="color:#00e5a0">'+allProducts.length+'</div><div class="stat-label">PRODUCTS</div></div><div class="stat-card"><div class="stat-val" style="color:#ff4d4d">'+allProducts.filter(p=>p.demandTrend==='hot').length+'</div><div class="stat-label">HOT 🔥</div></div><div class="stat-card"><div class="stat-val" style="color:#00e5a0">'+allProducts.filter(p=>p.demandTrend==='rising').length+'</div><div class="stat-la
