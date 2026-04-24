@@ -63,4 +63,305 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 14px; }
 .score-num { font-size: 11px; font-weight: 700; vertical-align: middle; }
 .select-btn { background: #00e5a020; color: #00e5a0; border: 1px solid #00e5a040; padding: 6px 10px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 10px; width: 100%; }
 .select-btn.selected { background: #00e5a0; color: #000; font-weight: 700; }
-.auto-btn { background: linear-gra
+.auto-btn { background: linear-gradient(135deg, #ff4d4d, #cc0000); color: #fff; border: none; padding: 14px 32px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 13px; letter-spacing: 3px; width: 100%; margin-bottom: 20px; }
+.auto-btn:disabled { background: #1a1a2e; color: #444; cursor: not-allowed; }
+.progress-box { background: #0d0d16; border: 1px solid #00e5a020; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
+.progress-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #111; font-size: 12px; }
+.progress-step:last-child { border-bottom: none; }
+.step-icon { font-size: 16px; width: 24px; text-align: center; }
+.step-text { flex: 1; color: #555; }
+.step-text.active { color: #e0e0e0; }
+.step-text.done { color: #00e5a0; }
+.step-status { font-size: 10px; color: #333; letter-spacing: 1px; }
+.step-status.done { color: #00e5a0; }
+.step-status.active { color: #ffd700; }
+.marketing-card { background: #0e0e16; border: 1px solid #1a1a2e; border-radius: 4px; padding: 20px; margin-bottom: 16px; }
+.marketing-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: #00e5a0; }
+.marketing-content { background: #0a0a0a; border: 1px solid #1a1a2e; border-radius: 3px; padding: 14px; font-size: 11px; color: #aaa; line-height: 1.7; white-space: pre-wrap; }
+.copy-btn { background: #111; color: #555; border: 1px solid #222; padding: 6px 14px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 8px; }
+.empty { text-align: center; padding: 60px 0; color: #1a1a1a; font-size: 11px; letter-spacing: 3px; }
+footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; letter-spacing: 2px; padding-bottom: 20px; }
+</style>
+</head>
+<body>
+<header>
+<div class="header-inner">
+<div>
+<div class="logo"><span>DROP</span><span>INTEL</span><span class="logo-sub">PRO</span></div>
+<div class="subtitle">ONE-STOP DROPSHIPPING AUTOMATION</div>
+</div>
+<div class="tabs">
+<button class="tab active" id="tab-research" onclick="showTab('research')">🔍 RESEARCH</button>
+<button class="tab" id="tab-lister" onclick="showTab('lister')">🛍️ LISTER</button>
+<button class="tab" id="tab-marketing" onclick="showTab('marketing')">📣 MARKETING</button>
+<button class="tab" id="tab-settings" onclick="showTab('settings')">⚙️ SETTINGS</button>
+</div>
+</div>
+</header>
+
+<main>
+<div id="msgBox" style="display:none;padding:14px;border-radius:4px;margin-bottom:16px;font-size:11px;"></div>
+
+<!-- RESEARCH -->
+<div id="section-research" class="section active">
+<div class="status-bar">
+<div class="status-item"><div class="status-dot red" id="resAiDot"></div><span id="resAiStatus" style="font-size:10px;letter-spacing:1px">AI NOT CONNECTED</span></div>
+<div class="status-item"><div class="status-dot red" id="resShopDot"></div><span id="resShopStatus" style="font-size:10px;letter-spacing:1px">SHOPIFY NOT CONNECTED</span></div>
+</div>
+<div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
+<button class="btn-primary" onclick="fetchProducts()" id="refreshBtn">↻ FIND TRENDING PRODUCTS</button>
+<button class="btn-secondary" onclick="showTab('settings')">⚙️ SETTINGS</button>
+<span id="lastUpdated" style="color:#333;font-size:9px;letter-spacing:1px"></span>
+</div>
+<div id="stats"></div>
+<div class="filters" id="filters" style="display:none"></div>
+<div class="loading" id="loading" style="display:none">
+<div class="loading-text">SCANNING MARKET TRENDS...</div>
+<div class="dots">
+<div class="dot" style="animation-delay:0s"></div>
+<div class="dot" style="animation-delay:0.2s"></div>
+<div class="dot" style="animation-delay:0.4s"></div>
+<div class="dot" style="animation-delay:0.6s"></div>
+<div class="dot" style="animation-delay:0.8s"></div>
+</div>
+</div>
+<div class="empty" id="researchEmpty">CONNECT YOUR API KEY IN SETTINGS TO GET STARTED</div>
+<div class="grid" id="grid"></div>
+</div>
+
+<!-- LISTER -->
+<div id="section-lister" class="section">
+<div style="margin-bottom:20px">
+<div style="color:#00e5a0;font-size:11px;letter-spacing:3px;margin-bottom:8px">🛍️ LIST PRODUCTS TO SHOPIFY</div>
+<div style="color:#444;font-size:12px;margin-bottom:16px">Select products from the Research tab, then list them all to Shopify with one click.</div>
+<div id="selectedCount" style="color:#ffd700;font-size:12px;margin-bottom:16px;letter-spacing:1px">0 PRODUCTS SELECTED</div>
+<button class="auto-btn" onclick="listAllProducts()" id="listBtn">🚀 LIST ALL SELECTED PRODUCTS TO SHOPIFY</button>
+</div>
+<div class="progress-box" id="progressBox" style="display:none">
+<div style="color:#00e5a0;font-size:10px;letter-spacing:3px;margin-bottom:16px">LISTING PROGRESS</div>
+<div id="progressSteps"></div>
+</div>
+</div>
+
+<!-- MARKETING -->
+<div id="section-marketing" class="section">
+<div style="margin-bottom:20px">
+<div style="color:#00e5a0;font-size:11px;letter-spacing:3px;margin-bottom:8px">📣 MARKETING GENERATOR</div>
+<div style="color:#444;font-size:12px;margin-bottom:16px">Generate TikTok scripts, Instagram captions and Facebook ads for your selected products.</div>
+<button class="btn-primary" onclick="generateMarketing()" id="marketingBtn">✨ GENERATE MARKETING CONTENT</button>
+</div>
+<div class="loading" id="marketingLoading" style="display:none">
+<div class="loading-text">GENERATING CONTENT...</div>
+<div class="dots">
+<div class="dot" style="animation-delay:0s"></div>
+<div class="dot" style="animation-delay:0.2s"></div>
+<div class="dot" style="animation-delay:0.4s"></div>
+</div>
+</div>
+<div id="marketingContent"></div>
+</div>
+
+<!-- SETTINGS -->
+<div id="section-settings" class="section">
+<div class="setup-box">
+<div class="setup-label">🔑 CONNECT YOUR SERVICES</div>
+<div class="setup-grid">
+<div class="setup-field">
+<label>ANTHROPIC API KEY</label>
+<input type="password" id="anthropicKey" placeholder="sk-ant-api03-...">
+</div>
+<div class="setup-field">
+<label>SHOPIFY ACCESS TOKEN</label>
+<input type="password" id="shopifyToken" placeholder="shpat_...">
+</div>
+<div class="setup-field">
+<label>SHOPIFY STORE DOMAIN</label>
+<input type="text" id="shopifyDomain" placeholder="your-store.myshopify.com">
+</div>
+</div>
+<button class="btn-primary" onclick="saveSettings()">SAVE & CONNECT →</button>
+</div>
+<div class="status-bar">
+<div class="status-item"><div class="status-dot red" id="aiDot"></div><span id="aiStatus" style="font-size:10px;letter-spacing:1px">AI NOT CONNECTED</span></div>
+<div class="status-item"><div class="status-dot red" id="shopDot"></div><span id="shopStatus" style="font-size:10px;letter-spacing:1px">SHOPIFY NOT CONNECTED</span></div>
+</div>
+</div>
+
+<footer>DROPINTEL PRO • AI-POWERED DROPSHIPPING AUTOMATION</footer>
+</main>
+
+<script>
+let cfg = {ai:'', shopToken:'', shopDomain:'bmaq7t-p1.myshopify.com'};
+let allProducts = [], selectedProducts = [], activeCategory = 'All';
+
+window.onload = function() {
+  try {
+    const saved = localStorage.getItem('dropintel_cfg');
+    if(saved) {
+      cfg = JSON.parse(saved);
+      if(cfg.ai) document.getElementById('anthropicKey').value = cfg.ai;
+      if(cfg.shopToken) document.getElementById('shopifyToken').value = cfg.shopToken;
+      if(cfg.shopDomain) document.getElementById('shopifyDomain').value = cfg.shopDomain;
+      updateStatus();
+    }
+  } catch(e) {}
+};
+
+function showTab(tab) {
+  document.querySelectorAll('.section').forEach(function(s) { s.classList.remove('active'); });
+  document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+  document.getElementById('section-'+tab).classList.add('active');
+  document.getElementById('tab-'+tab).classList.add('active');
+}
+
+function saveSettings() {
+  cfg.ai = document.getElementById('anthropicKey').value.trim();
+  cfg.shopToken = document.getElementById('shopifyToken').value.trim();
+  cfg.shopDomain = document.getElementById('shopifyDomain').value.trim() || 'bmaq7t-p1.myshopify.com';
+  try { localStorage.setItem('dropintel_cfg', JSON.stringify(cfg)); } catch(e) {}
+  updateStatus();
+  showMsg('Settings saved! Redirecting...', 'success');
+  setTimeout(function() { showTab('research'); }, 1500);
+}
+
+function updateStatus() {
+  var aiOk = cfg.ai && cfg.ai.length > 10;
+  var shopOk = cfg.shopToken && cfg.shopToken.length > 10;
+  document.getElementById('aiDot').className = 'status-dot ' + (aiOk?'green':'red');
+  document.getElementById('shopDot').className = 'status-dot ' + (shopOk?'green':'red');
+  document.getElementById('resAiDot').className = 'status-dot ' + (aiOk?'green':'red');
+  document.getElementById('resShopDot').className = 'status-dot ' + (shopOk?'green':'red');
+  document.getElementById('aiStatus').textContent = aiOk ? 'AI CONNECTED ✓' : 'AI NOT CONNECTED';
+  document.getElementById('shopStatus').textContent = shopOk ? 'SHOPIFY CONNECTED ✓' : 'SHOPIFY NOT CONNECTED';
+  document.getElementById('resAiStatus').textContent = aiOk ? 'AI CONNECTED ✓' : 'AI NOT CONNECTED — GO TO SETTINGS';
+  document.getElementById('resShopStatus').textContent = shopOk ? 'SHOPIFY CONNECTED ✓' : 'SHOPIFY NOT CONNECTED — GO TO SETTINGS';
+}
+
+function showMsg(msg, type) {
+  var box = document.getElementById('msgBox');
+  box.style.background = type === 'success' ? '#0d1a0d' : '#1a0d0d';
+  box.style.border = type === 'success' ? '1px solid #00e5a030' : '1px solid #ff4d4d30';
+  box.style.color = type === 'success' ? '#00e5a0' : '#ff4d4d';
+  box.textContent = msg;
+  box.style.display = 'block';
+  setTimeout(function() { box.style.display = 'none'; }, 4000);
+}
+
+function tc(t) { return t==='hot'?'#ff4d4d':t==='rising'?'#00e5a0':'#ffd700'; }
+function te(t) { return t==='hot'?'🔥':t==='rising'?'📈':'➡️'; }
+
+async function fetchProducts() {
+  if(!cfg.ai) { showTab('settings'); showMsg('Add your API key in Settings first!','error'); return; }
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('grid').innerHTML = '';
+  document.getElementById('researchEmpty').style.display = 'none';
+  document.getElementById('stats').innerHTML = '';
+  document.getElementById('filters').style.display = 'none';
+  document.getElementById('refreshBtn').disabled = true;
+  var today = new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  try {
+    var res = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json','x-api-key':cfg.ai}, body:JSON.stringify({model:'claude-haiku-4-5', max_tokens:4000, system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object needs: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(AliExpress search term). Return exactly 20 products.', messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins.'}]})});
+    var data = await res.json();
+    if(data.error){showMsg('Error: '+data.error.message,'error');return;}
+    var text = data.content.map(function(b){return b.text||'';}).join('').replace(/```json|```/g,'').trim();
+    allProducts = JSON.parse(text);
+    document.getElementById('lastUpdated').textContent = 'UPDATED '+new Date().toLocaleTimeString();
+    renderStats(); renderFilters(); renderGrid();
+  } catch(e) { showMsg('Failed to load. Check your API key.','error'); console.error(e); }
+  finally { document.getElementById('loading').style.display='none'; document.getElementById('refreshBtn').disabled=false; }
+}
+
+function renderStats() {
+  document.getElementById('stats').innerHTML = '<div class="stats"><div class="stat-card"><div class="stat-val" style="color:#00e5a0">'+allProducts.length+'</div><div class="stat-label">PRODUCTS</div></div><div class="stat-card"><div class="stat-val" style="color:#ff4d4d">'+allProducts.filter(function(p){return p.demandTrend==='hot';}).length+'</div><div class="stat-label">HOT 🔥</div></div><div class="stat-card"><div class="stat-val" style="color:#00e5a0">'+allProducts.filter(function(p){return p.demandTrend==='rising';}).length+'</div><div class="stat-label">RISING 📈</div></div><div class="stat-card"><div class="stat-val" style="color:#ffd700">'+selectedProducts.length+'</div><div class="stat-label">SELECTED</div></div></div>';
+}
+
+function renderFilters() {
+  var CATS = ['All','Home & Kitchen','Beauty & Personal Care','Tech & Gadgets','Fitness & Sports','Pet Supplies','Fashion & Accessories','Kids & Toys'];
+  document.getElementById('filters').innerHTML = CATS.map(function(c){return '<button class="filter-btn '+(c===activeCategory?'active':'')+'" onclick="setCategory(\''+c+'\')">'+c.toUpperCase()+'</button>';}).join('');
+  document.getElementById('filters').style.display = 'flex';
+}
+
+function setCategory(c) { activeCategory=c; renderFilters(); renderGrid(); }
+
+function toggleSelect(id) {
+  var p = allProducts.find(function(p){return p.id===id;});
+  if(!p) return;
+  var idx = selectedProducts.findIndex(function(s){return s.id===id;});
+  if(idx > -1) selectedProducts.splice(idx,1);
+  else selectedProducts.push(p);
+  document.getElementById('selectedCount').textContent = selectedProducts.length + ' PRODUCTS SELECTED';
+  if(allProducts.length > 0) renderStats();
+  renderGrid();
+}
+
+function renderGrid() {
+  var filtered = allProducts.filter(function(p){return activeCategory==='All'||p.category===activeCategory;}).sort(function(a,b){return b.trendScore-a.trendScore;});
+  if(!filtered.length){document.getElementById('grid').innerHTML='<div class="empty">NO PRODUCTS IN THIS CATEGORY</div>';return;}
+  document.getElementById('grid').innerHTML = filtered.map(function(p){
+    var c=tc(p.demandTrend);
+    var sel=selectedProducts.some(function(s){return s.id===p.id;});
+    return '<div class="card'+(sel?' selected':'')+'" style="cursor:default"><div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div><div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
+  }).join('');
+}
+
+async function listAllProducts() {
+  if(!cfg.shopToken) { showMsg('Add your Shopify token in Settings!','error'); return; }
+  if(selectedProducts.length === 0) { showMsg('Select products first in the Research tab!','error'); return; }
+  document.getElementById('listBtn').disabled = true;
+  document.getElementById('progressBox').style.display = 'block';
+  var steps = selectedProducts.map(function(p){return {id:p.id,name:p.name,status:'pending'};});
+  renderProgress(steps);
+  var successCount = 0;
+  for(var i=0; i<selectedProducts.length; i++) {
+    var p = selectedProducts[i];
+    steps[i].status = 'active';
+    renderProgress(steps);
+    try {
+      var desc = await generateDescription(p);
+      var price = p.sellingPrice.replace(/[^0-9.]/g,'');
+      var comparePrice = (parseFloat(price)*1.4).toFixed(2);
+      var productData = {product:{title:p.name,body_html:'<p>'+desc+'</p>',vendor:'The Shop',product_type:p.category,tags:p.category+',dropshipping,trending',status:'active',variants:[{price:price,compare_at_price:comparePrice,inventory_management:'shopify',inventory_quantity:999}]}};
+      var res = await fetch('/api/shopify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:cfg.shopToken,domain:cfg.shopDomain,product:productData})});
+      var data = await res.json();
+      if(data.product){steps[i].status='done';successCount++;}
+      else{steps[i].status='error';console.error(data);}
+    } catch(e) { steps[i].status='error'; }
+    renderProgress(steps);
+  }
+  showMsg('Listed '+successCount+' of '+selectedProducts.length+' products to Shopify!','success');
+  document.getElementById('listBtn').disabled = false;
+}
+
+function renderProgress(steps) {
+  document.getElementById('progressSteps').innerHTML = steps.map(function(s){
+    return '<div class="progress-step"><div class="step-icon">'+(s.status==='done'?'✅':s.status==='error'?'❌':s.status==='active'?'⏳':'⭕')+'</div><div class="step-text '+(s.status==='done'?'done':s.status==='active'?'active':'')+'" style="flex:1">'+s.name+'</div><div class="step-status '+(s.status==='done'?'done':s.status==='active'?'active':'')+'">'+(s.status==='done'?'LISTED':s.status==='error'?'FAILED':s.status==='active'?'LISTING...':'WAITING')+'</div></div>';
+  }).join('');
+}
+
+async function generateDescription(product) {
+  try {
+    var res = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:300,system:'Write a compelling 2-3 sentence Shopify product description. Return only the description, nothing else.',messages:[{role:'user',content:'Product: '+product.name+' Category: '+product.category+' Price: '+product.sellingPrice}]})});
+    var data = await res.json();
+    return data.content&&data.content[0]?data.content[0].text:product.whyTrending;
+  } catch(e) { return product.whyTrending; }
+}
+
+async function generateMarketing() {
+  if(!cfg.ai) { showMsg('Add your API key in Settings first!','error'); return; }
+  var products = selectedProducts.length>0?selectedProducts:allProducts.slice(0,3);
+  if(products.length===0){showMsg('Find products first in the Research tab!','error');return;}
+  document.getElementById('marketingLoading').style.display='block';
+  document.getElementById('marketingContent').innerHTML='';
+  document.getElementById('marketingBtn').disabled=true;
+  try {
+    var productList = products.slice(0,5).map(function(p){return p.name;}).join(', ');
+    var res = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:2000,system:'You are a social media marketing expert for dropshipping stores.',messages:[{role:'user',content:'Generate marketing content for: '+productList+'\n\nFor each product:\n1. TikTok script (30 sec)\n2. Instagram caption + hashtags\n3. Facebook ad copy\n\nUse product names as headers.'}]})});
+    var data = await res.json();
+    var content = data.content&&data.content[0]?data.content[0].text:'';
+    document.getElementById('marketingContent').innerHTML='<div class="marketing-card"><div class="marketing-title">📱 YOUR MARKETING CONTENT</div><div class="marketing-content">'+content+'</div><button class="copy-btn" onclick="navigator.clipboard.writeText(document.querySelector(\'.marketing-content\').textContent).then(function(){alert(\'Copied!\');})">📋 COPY ALL</button></div>';
+  } catch(e) { showMsg('Failed to generate content','error'); }
+  finally { document.getElementById('marketingLoading').style.display='none'; document.getElementById('marketingBtn').disabled=false; }
+}
+</script>
+</body>
+</html>
