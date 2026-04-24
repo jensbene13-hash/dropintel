@@ -5,7 +5,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const { messages, system, model, max_tokens } = body;
+    const { messages, system, model } = body;
     const apiKey = req.headers['x-api-key'];
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -14,7 +14,7 @@ export default async function handler(req, res) {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
-      body: JSON.stringify({ model, max_tokens, system, messages })
+      body: JSON.stringify({ model, max_tokens: 4000, system, messages })
     });
     const data = await response.json();
     res.status(200).json(data);
