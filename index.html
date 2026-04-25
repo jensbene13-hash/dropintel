@@ -56,13 +56,14 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 14px; }
 .prices { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-bottom: 10px; text-align: center; }
 .price-val { font-size: 12px; font-weight: 700; }
 .price-label { font-size: 8px; color: #333; letter-spacing: 1px; margin-top: 2px; }
-.card-footer { display: flex; justify-content: space-between; align-items: center; }
+.card-footer { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .platform-tag { background: #1a1a2e; color: #333; font-size: 8px; padding: 2px 5px; border-radius: 2px; margin-right: 4px; }
 .score-bar { width: 26px; height: 3px; background: #1a1a2e; border-radius: 2px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 3px; }
 .score-fill { height: 100%; border-radius: 2px; }
 .score-num { font-size: 11px; font-weight: 700; vertical-align: middle; }
-.select-btn { background: #00e5a020; color: #00e5a0; border: 1px solid #00e5a040; padding: 6px 10px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 10px; width: 100%; }
+.select-btn { background: #00e5a020; color: #00e5a0; border: 1px solid #00e5a040; padding: 6px 10px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 6px; width: 100%; }
 .select-btn.selected { background: #00e5a0; color: #000; font-weight: 700; }
+.supplier-btn { background: #ff4d4d15; color: #ff4d4d; border: 1px solid #ff4d4d30; padding: 6px 10px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 6px; width: 100%; text-decoration: none; display: block; text-align: center; }
 .auto-btn { background: linear-gradient(135deg, #ff4d4d, #cc0000); color: #fff; border: none; padding: 14px 32px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 13px; letter-spacing: 3px; width: 100%; margin-bottom: 20px; }
 .auto-btn:disabled { background: #1a1a2e; color: #444; cursor: not-allowed; }
 .progress-box { background: #0d0d16; border: 1px solid #00e5a020; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
@@ -133,7 +134,7 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <div id="section-lister" class="section">
 <div style="margin-bottom:20px">
 <div style="color:#00e5a0;font-size:11px;letter-spacing:3px;margin-bottom:8px">🛍️ LIST PRODUCTS TO SHOPIFY</div>
-<div style="color:#444;font-size:12px;margin-bottom:16px">Select products from the Research tab, then list them all to Shopify with one click. Images are pulled automatically!</div>
+<div style="color:#444;font-size:12px;margin-bottom:16px">Select products from Research tab, then list them to Shopify. Images pulled from AliExpress automatically!</div>
 <div id="selectedCount" style="color:#ffd700;font-size:12px;margin-bottom:16px;letter-spacing:1px">0 PRODUCTS SELECTED</div>
 <button class="auto-btn" onclick="listAllProducts()" id="listBtn">🚀 LIST ALL SELECTED PRODUCTS TO SHOPIFY</button>
 </div>
@@ -250,6 +251,10 @@ function showMsg(msg, type) {
 function tc(t){return t==='hot'?'#ff4d4d':t==='rising'?'#00e5a0':'#ffd700';}
 function te(t){return t==='hot'?'🔥':t==='rising'?'📈':'➡️';}
 
+function getAliExpressUrl(searchTerm) {
+  return 'https://www.aliexpress.com/wholesale?SearchText=' + encodeURIComponent(searchTerm);
+}
+
 async function fetchProducts() {
   if(!cfg.ai){showTab('settings');showMsg('Add your API key in Settings first!','error');return;}
   document.getElementById('loading').style.display='block';
@@ -260,7 +265,7 @@ async function fetchProducts() {
   document.getElementById('refreshBtn').disabled=true;
   var today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   try {
-    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(best AliExpress search term for finding this product). Return exactly 20 products.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins and strong demand.'}]})});
+    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(best AliExpress search term). Return exactly 20 products.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins.'}]})});
     var data=await res.json();
     if(data.error){showMsg('Error: '+data.error.message,'error');return;}
     var text=data.content.map(function(b){return b.text||'';}).join('').replace(/```json|```/g,'').trim();
@@ -299,7 +304,8 @@ function renderGrid() {
   if(!filtered.length){document.getElementById('grid').innerHTML='<div class="empty">NO PRODUCTS IN THIS CATEGORY</div>';return;}
   document.getElementById('grid').innerHTML=filtered.map(function(p){
     var c=tc(p.demandTrend),sel=selectedProducts.some(function(s){return s.id===p.id;});
-    return '<div class="card'+(sel?' selected':'')+'"><div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div><div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
+    var aliUrl=getAliExpressUrl(p.searchTerm||p.name);
+    return '<div class="card'+(sel?' selected':'')+'"><div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div><div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><a href="'+aliUrl+'" target="_blank" class="supplier-btn">🛒 VIEW ON ALIEXPRESS</a><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
   }).join('');
 }
 
