@@ -134,7 +134,7 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <div id="section-lister" class="section">
 <div style="margin-bottom:20px">
 <div style="color:#00e5a0;font-size:11px;letter-spacing:3px;margin-bottom:8px">🛍️ LIST PRODUCTS TO SHOPIFY</div>
-<div style="color:#444;font-size:12px;margin-bottom:16px">Select products from Research tab, then list them to Shopify. Images pulled from AliExpress automatically!</div>
+<div style="color:#444;font-size:12px;margin-bottom:16px">Select products from Research tab, then list them to Shopify with one click!</div>
 <div id="selectedCount" style="color:#ffd700;font-size:12px;margin-bottom:16px;letter-spacing:1px">0 PRODUCTS SELECTED</div>
 <button class="auto-btn" onclick="listAllProducts()" id="listBtn">🚀 LIST ALL SELECTED PRODUCTS TO SHOPIFY</button>
 </div>
@@ -194,6 +194,7 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <script>
 let cfg = {ai:'', shopToken:'', shopDomain:'bmaq7t-p1.myshopify.com'};
 let allProducts = [], selectedProducts = [], activeCategory = 'All';
+let productSupplierData = {};
 
 window.onload = function() {
   try {
@@ -251,10 +252,6 @@ function showMsg(msg, type) {
 function tc(t){return t==='hot'?'#ff4d4d':t==='rising'?'#00e5a0':'#ffd700';}
 function te(t){return t==='hot'?'🔥':t==='rising'?'📈':'➡️';}
 
-function getAliExpressUrl(searchTerm) {
-  return 'https://www.aliexpress.com/wholesale?SearchText=' + encodeURIComponent(searchTerm);
-}
-
 async function fetchProducts() {
   if(!cfg.ai){showTab('settings');showMsg('Add your API key in Settings first!','error');return;}
   document.getElementById('loading').style.display='block';
@@ -263,17 +260,40 @@ async function fetchProducts() {
   document.getElementById('stats').innerHTML='';
   document.getElementById('filters').style.display='none';
   document.getElementById('refreshBtn').disabled=true;
+  productSupplierData = {};
   var today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   try {
-    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(best AliExpress search term). Return exactly 20 products.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins.'}]})});
+    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(the most specific AliExpress search term to find the best selling version of this product with good reviews). Return exactly 20 products.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins and strong demand.'}]})});
     var data=await res.json();
     if(data.error){showMsg('Error: '+data.error.message,'error');return;}
     var text=data.content.map(function(b){return b.text||'';}).join('').replace(/```json|```/g,'').trim();
     allProducts=JSON.parse(text);
     document.getElementById('lastUpdated').textContent='UPDATED '+new Date().toLocaleTimeString();
-    renderStats();renderFilters();renderGrid();
+    renderStats();renderFilters();
+    await loadSupplierData();
+    renderGrid();
   } catch(e){showMsg('Failed to load. Check your API key.','error');console.error(e);}
   finally{document.getElementById('loading').style.display='none';document.getElementById('refreshBtn').disabled=false;}
+}
+
+async function loadSupplierData() {
+  // Load supplier URLs and images for all products in parallel
+  var promises = allProducts.map(async function(p) {
+    try {
+      var res = await fetch('/api/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:p.searchTerm||p.name})});
+      var data = await res.json();
+      productSupplierData[p.id] = {
+        imageUrl: data.imageUrl || null,
+        supplierUrl: data.supplierUrl || ('https://www.aliexpress.com/wholesale?SortType=total_tranqnumber_desc&SearchText='+encodeURIComponent(p.searchTerm||p.name))
+      };
+    } catch(e) {
+      productSupplierData[p.id] = {
+        imageUrl: null,
+        supplierUrl: 'https://www.aliexpress.com/wholesale?SortType=total_tranqnumber_desc&SearchText='+encodeURIComponent(p.searchTerm||p.name)
+      };
+    }
+  });
+  await Promise.all(promises);
 }
 
 function renderStats() {
@@ -304,17 +324,12 @@ function renderGrid() {
   if(!filtered.length){document.getElementById('grid').innerHTML='<div class="empty">NO PRODUCTS IN THIS CATEGORY</div>';return;}
   document.getElementById('grid').innerHTML=filtered.map(function(p){
     var c=tc(p.demandTrend),sel=selectedProducts.some(function(s){return s.id===p.id;});
-    var aliUrl=getAliExpressUrl(p.searchTerm||p.name);
-    return '<div class="card'+(sel?' selected':'')+'"><div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div><div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><a href="'+aliUrl+'" target="_blank" class="supplier-btn">🛒 VIEW ON ALIEXPRESS</a><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
+    var supplierData=productSupplierData[p.id]||{};
+    var supplierUrl=supplierData.supplierUrl||('https://www.aliexpress.com/wholesale?SortType=total_tranqnumber_desc&SearchText='+encodeURIComponent(p.searchTerm||p.name));
+    var imageUrl=supplierData.imageUrl;
+    var imgHtml=imageUrl?'<img src="'+imageUrl+'" style="width:100%;height:160px;object-fit:cover;border-radius:3px;margin-bottom:10px;" onerror="this.style.display=\'none\'">':'';
+    return '<div class="card'+(sel?' selected':'')+'">'+imgHtml+'<div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div><div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><a href="'+supplierUrl+'" target="_blank" class="supplier-btn">🛒 SOURCE ON ALIEXPRESS</a><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
   }).join('');
-}
-
-async function getProductImage(query) {
-  try {
-    var res=await fetch('/api/images',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:query})});
-    var data=await res.json();
-    return data.imageUrl||null;
-  } catch(e){return null;}
 }
 
 async function listAllProducts() {
@@ -331,7 +346,8 @@ async function listAllProducts() {
     renderProgress(steps);
     try {
       var desc=await generateDescription(p);
-      var imageUrl=await getProductImage(p.searchTerm||p.name);
+      var supplierData=productSupplierData[p.id]||{};
+      var imageUrl=supplierData.imageUrl||null;
       var price=p.sellingPrice.replace(/[^0-9.]/g,'');
       var comparePrice=(parseFloat(price)*1.4).toFixed(2);
       var productData={product:{title:p.name,body_html:'<p>'+desc+'</p>',vendor:'The Shop',product_type:p.category,tags:p.category+',dropshipping,trending',status:'active',variants:[{price:price,compare_at_price:comparePrice,inventory_management:'shopify',inventory_quantity:999}],images:imageUrl?[{src:imageUrl}]:[]}};
