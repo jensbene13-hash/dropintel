@@ -17,13 +17,6 @@ header { background: linear-gradient(135deg, #0d0d1a, #1a0d2e, #0d1a0d); border-
 .tab { background: #111; color: #555; border: 1px solid #222; padding: 8px 16px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 10px; letter-spacing: 1px; transition: all 0.2s; }
 .tab.active { background: #00e5a0; color: #000; border-color: #00e5a0; font-weight: 700; }
 main { max-width: 1200px; margin: 0 auto; padding: 20px 14px; }
-.setup-box { background: #0d0d16; border: 1px solid #00e5a020; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
-.setup-label { color: #00e5a0; font-size: 10px; letter-spacing: 3px; margin-bottom: 12px; }
-.setup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-.setup-field label { color: #444; font-size: 9px; letter-spacing: 2px; display: block; margin-bottom: 6px; }
-.setup-field input { width: 100%; background: #0a0a0a; border: 1px solid #00e5a030; border-radius: 3px; padding: 10px 14px; color: #e0e0e0; font-family: 'Courier New', monospace; font-size: 11px; outline: none; }
-.btn-primary { background: linear-gradient(135deg, #00e5a0, #00b37a); color: #000; border: none; padding: 10px 24px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 11px; letter-spacing: 2px; margin-top: 12px; }
-.btn-secondary { background: #111; color: #555; border: 1px solid #222; padding: 8px 16px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 10px; letter-spacing: 1px; }
 .status-bar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 .status-item { display: flex; align-items: center; gap: 6px; font-size: 10px; letter-spacing: 1px; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; }
@@ -49,7 +42,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 14px; }
 .card.selected { border-color: #00e5a0; background: #0d1a0d; }
 .trend-bar { position: absolute; top: 0; left: 0; height: 2px; }
 .cat-tag { background: #1a1a2e; color: #333; font-size: 8px; padding: 2px 6px; border-radius: 2px; letter-spacing: 1px; }
-.card-title { font-size: 13px; font-weight: 700; margin: 8px 0 6px; line-height: 1.3; }
+.card-title { font-size: 14px; font-weight: 700; margin: 8px 0 6px; line-height: 1.3; }
 .card-why { font-size: 10px; color: #444; margin-bottom: 12px; line-height: 1.5; }
 .prices { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-bottom: 10px; text-align: center; }
 .price-val { font-size: 12px; font-weight: 700; }
@@ -59,26 +52,21 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 14px; }
 .score-bar { width: 26px; height: 3px; background: #1a1a2e; border-radius: 2px; overflow: hidden; display: inline-block; vertical-align: middle; margin-right: 3px; }
 .score-fill { height: 100%; border-radius: 2px; }
 .score-num { font-size: 11px; font-weight: 700; vertical-align: middle; }
-.select-btn { background: #00e5a020; color: #00e5a0; border: 1px solid #00e5a040; padding: 6px 10px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 6px; width: 100%; }
-.select-btn.selected { background: #00e5a0; color: #000; font-weight: 700; }
-.supplier-btn { background: #ff4d4d15; color: #ff4d4d; border: 1px solid #ff4d4d30; padding: 6px 10px; border-radius: 2px; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 6px; width: 100%; text-decoration: none; display: block; text-align: center; }
-.cj-badge { background: #ffd70020; color: #ffd700; border: 1px solid #ffd70030; padding: 3px 8px; border-radius: 2px; font-size: 8px; letter-spacing: 1px; display: inline-block; margin-bottom: 6px; }
-.auto-btn { background: linear-gradient(135deg, #ff4d4d, #cc0000); color: #fff; border: none; padding: 14px 32px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 13px; letter-spacing: 3px; width: 100%; margin-bottom: 10px; }
-.auto-btn:disabled { background: #1a1a2e; color: #444; cursor: not-allowed; }
-.cj-btn { background: linear-gradient(135deg, #ffd700, #cc9900); color: #000; border: none; padding: 14px 32px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 13px; letter-spacing: 3px; width: 100%; margin-bottom: 10px; }
-.cj-btn:disabled { background: #1a1a2e; color: #444; cursor: not-allowed; }
-.progress-box { background: #0d0d16; border: 1px solid #00e5a020; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
-.progress-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #111; font-size: 12px; }
-.progress-step:last-child { border-bottom: none; }
-.step-icon { font-size: 16px; width: 24px; text-align: center; }
-.step-text { flex: 1; color: #555; }
-.step-text.active { color: #e0e0e0; }
-.step-text.done { color: #00e5a0; }
-.step-status { font-size: 10px; color: #333; letter-spacing: 1px; }
-.step-status.done { color: #00e5a0; }
-.step-status.active { color: #ffd700; }
+.cj-btn-card { background: #ff4d4d15; color: #ff4d4d; border: 1px solid #ff4d4d30; padding: 6px 10px; border-radius: 2px; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 6px; width: 100%; text-decoration: none; display: block; text-align: center; }
+.market-btn-card { background: #00e5a020; color: #00e5a0; border: 1px solid #00e5a040; padding: 6px 10px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 6px; width: 100%; }
+.btn-primary { background: linear-gradient(135deg, #00e5a0, #00b37a); color: #000; border: none; padding: 10px 24px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 11px; letter-spacing: 2px; margin-top: 12px; }
+.btn-secondary { background: #111; color: #555; border: 1px solid #222; padding: 8px 16px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 10px; letter-spacing: 1px; }
+.setup-box { background: #0d0d16; border: 1px solid #00e5a020; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
+.setup-label { color: #00e5a0; font-size: 10px; letter-spacing: 3px; margin-bottom: 12px; }
+.setup-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.setup-field label { color: #444; font-size: 9px; letter-spacing: 2px; display: block; margin-bottom: 6px; }
+.setup-field input { width: 100%; background: #0a0a0a; border: 1px solid #00e5a030; border-radius: 3px; padding: 10px 14px; color: #e0e0e0; font-family: 'Courier New', monospace; font-size: 11px; outline: none; }
+.marketing-box { background: #0d0d16; border: 1px solid #00e5a020; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
+.marketing-input { width: 100%; background: #0a0a0a; border: 1px solid #00e5a030; border-radius: 3px; padding: 12px 14px; color: #e0e0e0; font-family: 'Courier New', monospace; font-size: 12px; outline: none; margin-bottom: 10px; }
 .marketing-card { background: #0e0e16; border: 1px solid #1a1a2e; border-radius: 4px; padding: 20px; margin-bottom: 16px; }
-.marketing-title { font-size: 14px; font-weight: 700; margin-bottom: 12px; color: #00e5a0; }
+.marketing-section { margin-bottom: 20px; border-bottom: 1px solid #1a1a2e; padding-bottom: 16px; }
+.marketing-section:last-child { border-bottom: none; }
+.marketing-section-title { color: #00e5a0; font-size: 10px; letter-spacing: 2px; margin-bottom: 10px; }
 .marketing-content { background: #0a0a0a; border: 1px solid #1a1a2e; border-radius: 3px; padding: 14px; font-size: 11px; color: #aaa; line-height: 1.7; white-space: pre-wrap; }
 .copy-btn { background: #111; color: #555; border: 1px solid #222; padding: 6px 14px; border-radius: 2px; cursor: pointer; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 8px; }
 .empty { text-align: center; padding: 60px 0; color: #1a1a1a; font-size: 11px; letter-spacing: 3px; }
@@ -90,11 +78,10 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <div class="header-inner">
 <div>
 <div class="logo"><span>DROP</span><span>INTEL</span><span class="logo-sub">PRO</span></div>
-<div class="subtitle">ONE-STOP DROPSHIPPING AUTOMATION</div>
+<div class="subtitle">AI-POWERED DROPSHIPPING AUTOMATION</div>
 </div>
 <div class="tabs">
 <button class="tab active" id="tab-research" onclick="showTab('research')">🔍 RESEARCH</button>
-<button class="tab" id="tab-lister" onclick="showTab('lister')">🛍️ LISTER</button>
 <button class="tab" id="tab-marketing" onclick="showTab('marketing')">📣 MARKETING</button>
 <button class="tab" id="tab-settings" onclick="showTab('settings')">⚙️ SETTINGS</button>
 </div>
@@ -108,8 +95,6 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <div id="section-research" class="section active">
 <div class="status-bar">
 <div class="status-item"><div class="status-dot red" id="resAiDot"></div><span id="resAiStatus" style="font-size:10px;letter-spacing:1px">AI NOT CONNECTED</span></div>
-<div class="status-item"><div class="status-dot red" id="resShopDot"></div><span id="resShopStatus" style="font-size:10px;letter-spacing:1px">SHOPIFY NOT CONNECTED</span></div>
-<div class="status-item"><div class="status-dot red" id="resCjDot"></div><span id="resCjStatus" style="font-size:10px;letter-spacing:1px">CJ NOT CONNECTED</span></div>
 </div>
 <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
 <button class="btn-primary" onclick="fetchProducts()" id="refreshBtn">↻ FIND TRENDING PRODUCTS</button>
@@ -128,49 +113,30 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <div class="dot" style="animation-delay:0.8s"></div>
 </div>
 </div>
-<div class="empty" id="researchEmpty">CONNECT YOUR KEYS IN SETTINGS TO GET STARTED</div>
+<div class="empty" id="researchEmpty">CONNECT YOUR API KEY IN SETTINGS TO GET STARTED</div>
 <div class="grid" id="grid"></div>
-</div>
-
-<!-- LISTER -->
-<div id="section-lister" class="section">
-<div style="margin-bottom:20px">
-<div style="color:#00e5a0;font-size:11px;letter-spacing:3px;margin-bottom:8px">🛍️ LIST PRODUCTS TO SHOPIFY</div>
-<div style="color:#444;font-size:12px;margin-bottom:16px">Select products from Research tab, then use the buttons below!</div>
-<div id="selectedCount" style="color:#ffd700;font-size:12px;margin-bottom:16px;letter-spacing:1px">0 PRODUCTS SELECTED</div>
-<div style="background:#0d1a0d;border:1px solid #00e5a020;border-radius:4px;padding:16px;margin-bottom:16px;">
-<div style="color:#00e5a0;font-size:10px;letter-spacing:2px;margin-bottom:8px">RECOMMENDED WORKFLOW:</div>
-<div style="color:#555;font-size:11px;line-height:1.8">
-1️⃣ Click <strong style="color:#ffd700">"ADD TO CJ"</strong> — finds products on CJ and adds to your list<br>
-2️⃣ Open CJ app in Shopify → click <strong style="color:#ffd700">"List to Store"</strong> for each product<br>
-3️⃣ Products appear with real images automatically!
-</div>
-</div>
-<button class="cj-btn" onclick="addAllToCJ()" id="cjBtn">📦 ADD ALL SELECTED TO CJ</button>
-<button class="auto-btn" onclick="listAllProducts()" id="listBtn">🚀 LIST DIRECTLY TO SHOPIFY</button>
-</div>
-<div class="progress-box" id="progressBox" style="display:none">
-<div style="color:#00e5a0;font-size:10px;letter-spacing:3px;margin-bottom:16px">PROGRESS</div>
-<div id="progressSteps"></div>
-</div>
 </div>
 
 <!-- MARKETING -->
 <div id="section-marketing" class="section">
-<div style="margin-bottom:20px">
-<div style="color:#00e5a0;font-size:11px;letter-spacing:3px;margin-bottom:8px">📣 MARKETING GENERATOR</div>
-<div style="color:#444;font-size:12px;margin-bottom:16px">Generate TikTok scripts, Instagram captions and Facebook ads for your selected products.</div>
-<button class="btn-primary" onclick="generateMarketing()" id="marketingBtn">✨ GENERATE MARKETING CONTENT</button>
+<div class="marketing-box">
+<div class="setup-label">📣 GENERATE MARKETING CONTENT</div>
+<div style="color:#444;font-size:11px;margin-bottom:16px;">Paste a product name, URL or description below and we'll generate all your marketing content automatically!</div>
+<input type="text" class="marketing-input" id="productInput" placeholder="e.g. Smart LED Strip Lights with App Control — or paste a CJ/Shopify product URL">
+<div style="display:flex;gap:10px;flex-wrap:wrap;">
+<button class="btn-primary" onclick="generateMarketing()" id="marketingBtn">✨ GENERATE ALL MARKETING</button>
+<button class="btn-secondary" onclick="generateFromSelected()">📋 USE SELECTED PRODUCTS</button>
+</div>
 </div>
 <div class="loading" id="marketingLoading" style="display:none">
-<div class="loading-text">GENERATING CONTENT...</div>
+<div class="loading-text">CREATING YOUR MARKETING...</div>
 <div class="dots">
 <div class="dot" style="animation-delay:0s"></div>
 <div class="dot" style="animation-delay:0.2s"></div>
 <div class="dot" style="animation-delay:0.4s"></div>
 </div>
 </div>
-<div id="marketingContent"></div>
+<div id="marketingOutput"></div>
 </div>
 
 <!-- SETTINGS -->
@@ -210,7 +176,6 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <script>
 let cfg = {ai:'', shopToken:'', shopDomain:'bmaq7t-p1.myshopify.com', cjKey:''};
 let allProducts = [], selectedProducts = [], activeCategory = 'All';
-let productSupplierData = {};
 
 window.onload = function() {
   try {
@@ -252,14 +217,10 @@ function updateStatus() {
   document.getElementById('shopDot').className = 'status-dot '+(shopOk?'green':'red');
   document.getElementById('cjDot').className = 'status-dot '+(cjOk?'green':'red');
   document.getElementById('resAiDot').className = 'status-dot '+(aiOk?'green':'red');
-  document.getElementById('resShopDot').className = 'status-dot '+(shopOk?'green':'red');
-  document.getElementById('resCjDot').className = 'status-dot '+(cjOk?'green':'red');
   document.getElementById('aiStatus').textContent = aiOk?'AI CONNECTED ✓':'AI NOT CONNECTED';
   document.getElementById('shopStatus').textContent = shopOk?'SHOPIFY CONNECTED ✓':'SHOPIFY NOT CONNECTED';
   document.getElementById('cjStatus').textContent = cjOk?'CJ CONNECTED ✓':'CJ NOT CONNECTED';
-  document.getElementById('resAiStatus').textContent = aiOk?'AI CONNECTED ✓':'AI NOT CONNECTED';
-  document.getElementById('resShopStatus').textContent = shopOk?'SHOPIFY CONNECTED ✓':'SHOPIFY NOT CONNECTED';
-  document.getElementById('resCjStatus').textContent = cjOk?'CJ CONNECTED ✓':'CJ NOT CONNECTED';
+  document.getElementById('resAiStatus').textContent = aiOk?'AI CONNECTED ✓':'AI NOT CONNECTED — GO TO SETTINGS';
 }
 
 function showMsg(msg, type) {
@@ -283,41 +244,18 @@ async function fetchProducts() {
   document.getElementById('stats').innerHTML='';
   document.getElementById('filters').style.display='none';
   document.getElementById('refreshBtn').disabled=true;
-  productSupplierData={};
+  selectedProducts=[];
   var today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   try {
-    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(short 2-3 word CJ search term). Return exactly 20 DIFFERENT products each time, vary the categories and types.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins. Focus on what is actually trending RIGHT NOW based on current social media and consumer demand. Make sure these are different from common suggestions.'}]})});
+    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert with access to real-time market data. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(2-3 word CJ search term). Return exactly 20 VARIED products across different categories.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products RIGHT NOW. Focus on what is actually viral on TikTok, trending on Amazon and selling fast. Give me variety across all categories. Make these genuinely different each time.'}]})});
     var data=await res.json();
     if(data.error){showMsg('Error: '+data.error.message,'error');return;}
     var text=data.content.map(function(b){return b.text||'';}).join('').replace(/```json|```/g,'').trim();
     allProducts=JSON.parse(text);
     document.getElementById('lastUpdated').textContent='UPDATED '+new Date().toLocaleTimeString();
-    renderStats();renderFilters();
-    document.getElementById('loading').style.display='none';
-    renderGrid();
-    if(cfg.cjKey) loadSupplierData();
+    renderStats();renderFilters();renderGrid();
   } catch(e){showMsg('Failed to load. Check your API key.','error');console.error(e);}
   finally{document.getElementById('loading').style.display='none';document.getElementById('refreshBtn').disabled=false;}
-}
-
-async function loadSupplierData() {
-  for(var i=0;i<allProducts.length;i++) {
-    var p=allProducts[i];
-    try {
-      var res=await fetch('/api/cj',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:p.searchTerm||p.name,cjKey:cfg.cjKey})});
-      var data=await res.json();
-      productSupplierData[p.id]={
-        supplierUrl:data.supplierUrl||null,
-        cjPrice:data.price||null,
-        productName:data.productName||null,
-        found:!!data.productId
-      };
-    } catch(e){
-      productSupplierData[p.id]={supplierUrl:null,found:false};
-    }
-    if(i%5===0) renderGrid();
-  }
-  renderGrid();
 }
 
 function renderStats() {
@@ -338,8 +276,7 @@ function toggleSelect(id) {
   var idx=selectedProducts.findIndex(function(s){return s.id===id;});
   if(idx>-1)selectedProducts.splice(idx,1);
   else selectedProducts.push(p);
-  document.getElementById('selectedCount').textContent=selectedProducts.length+' PRODUCTS SELECTED';
-  if(allProducts.length>0)renderStats();
+  renderStats();
   renderGrid();
 }
 
@@ -348,94 +285,39 @@ function renderGrid() {
   if(!filtered.length){document.getElementById('grid').innerHTML='<div class="empty">NO PRODUCTS IN THIS CATEGORY</div>';return;}
   document.getElementById('grid').innerHTML=filtered.map(function(p){
     var c=tc(p.demandTrend),sel=selectedProducts.some(function(s){return s.id===p.id;});
-    var sd=productSupplierData[p.id];
-    var supplierUrl=sd&&sd.supplierUrl?sd.supplierUrl:('https://cjdropshipping.com/list/wholesale-all-categories-l-all.html?searchValue='+encodeURIComponent((p.searchTerm||p.name).split(' ').slice(0,3).join(' ')));
-    var cjFound=sd&&sd.found;
-    var cjName=sd&&sd.productName?'<div style="color:#ffd700;font-size:9px;margin-bottom:6px;letter-spacing:1px">📦 '+sd.productName.substring(0,45)+'...</div>':'';
-    return '<div class="card'+(sel?' selected':'')+'"><div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div>'+(cjFound?'<span class="cj-badge">✓ FOUND ON CJ</span>':'')+cjName+'<div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><a href="'+supplierUrl+'" target="_blank" class="supplier-btn">🛒 SOURCE ON CJDROPSHIPPING</a><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
+    var cjUrl='https://cjdropshipping.com/list/wholesale-all-categories-l-all.html?searchValue='+encodeURIComponent((p.searchTerm||p.name).split(' ').slice(0,3).join(' '));
+    return '<div class="card'+(sel?' selected':'')+'"><div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div><div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><a href="'+cjUrl+'" target="_blank" class="cj-btn-card">🛒 SOURCE ON CJDROPSHIPPING</a><button class="market-btn-card" onclick="marketProduct(\''+p.name.replace(/'/g,"\\'")+'\')"  >📣 GENERATE MARKETING</button><button class="market-btn-card'+(sel?' selected':'')+'" style="'+(sel?'background:#00e5a0;color:#000;':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED':'+ SELECT')+'</button></div>';
   }).join('');
 }
 
-async function addAllToCJ() {
-  if(!cfg.cjKey){showMsg('Add your CJ key in Settings!','error');return;}
-  if(selectedProducts.length===0){showMsg('Select products first!','error');return;}
-  document.getElementById('cjBtn').disabled=true;
-  document.getElementById('progressBox').style.display='block';
-  var steps=selectedProducts.map(function(p){return {id:p.id,name:p.name,status:'pending'};});
-  renderProgress(steps);
-  var count=0;
-  for(var i=0;i<selectedProducts.length;i++){
-    var p=selectedProducts[i];
-    steps[i].status='active';
-    renderProgress(steps);
-    try{
-      var res=await fetch('/api/cj',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:p.searchTerm||p.name,cjKey:cfg.cjKey,addToList:true})});
-      var data=await res.json();
-      if(data.productId){steps[i].status='done';count++;}
-      else{steps[i].status='error';}
-    }catch(e){steps[i].status='error';}
-    renderProgress(steps);
-  }
-  showMsg('Added '+count+' products to CJ! Open CJ app in Shopify → List to Store 🎉','success');
-  document.getElementById('cjBtn').disabled=false;
+function marketProduct(name) {
+  document.getElementById('productInput').value = name;
+  showTab('marketing');
+  generateMarketing();
 }
 
-async function listAllProducts() {
-  if(!cfg.shopToken){showMsg('Add your Shopify token in Settings!','error');return;}
-  if(selectedProducts.length===0){showMsg('Select products first!','error');return;}
-  document.getElementById('listBtn').disabled=true;
-  document.getElementById('progressBox').style.display='block';
-  var steps=selectedProducts.map(function(p){return {id:p.id,name:p.name,status:'pending'};});
-  renderProgress(steps);
-  var successCount=0;
-  for(var i=0;i<selectedProducts.length;i++) {
-    var p=selectedProducts[i];
-    steps[i].status='active';
-    renderProgress(steps);
-    try {
-      var desc=await generateDescription(p);
-      var price=p.sellingPrice.replace(/[^0-9.]/g,'');
-      var comparePrice=(parseFloat(price)*1.4).toFixed(2);
-      var productData={product:{title:p.name,body_html:'<p>'+desc+'</p>',vendor:'The Shop',product_type:p.category,tags:p.category+',dropshipping,trending',status:'active',variants:[{price:price,compare_at_price:comparePrice,inventory_management:'shopify',inventory_quantity:999}]}};
-      var res2=await fetch('/api/shopify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:cfg.shopToken,domain:cfg.shopDomain,product:productData})});
-      var data2=await res2.json();
-      if(data2.product){steps[i].status='done';successCount++;}
-      else{steps[i].status='error';}
-    } catch(e){steps[i].status='error';}
-    renderProgress(steps);
-  }
-  showMsg('Listed '+successCount+' of '+selectedProducts.length+' products to Shopify!','success');
-  document.getElementById('listBtn').disabled=false;
-}
-
-function renderProgress(steps) {
-  document.getElementById('progressSteps').innerHTML=steps.map(function(s){
-    return '<div class="progress-step"><div class="step-icon">'+(s.status==='done'?'✅':s.status==='error'?'❌':s.status==='active'?'⏳':'⭕')+'</div><div class="step-text '+(s.status==='done'?'done':s.status==='active'?'active':'')+'" style="flex:1">'+s.name+'</div><div class="step-status '+(s.status==='done'?'done':s.status==='active'?'active':'')+'">'+(s.status==='done'?'DONE ✓':s.status==='error'?'FAILED':s.status==='active'?'PROCESSING...':'WAITING')+'</div></div>';
-  }).join('');
-}
-
-async function generateDescription(product) {
-  try {
-    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:300,system:'Write a compelling 2-3 sentence Shopify product description. Return only the description, nothing else.',messages:[{role:'user',content:'Product: '+product.name+' Category: '+product.category+' Price: '+product.sellingPrice}]})});
-    var data=await res.json();
-    return data.content&&data.content[0]?data.content[0].text:product.whyTrending;
-  } catch(e){return product.whyTrending;}
+function generateFromSelected() {
+  if(selectedProducts.length === 0){showMsg('Select products first in Research tab!','error');return;}
+  var names = selectedProducts.map(function(p){return p.name;}).join(', ');
+  document.getElementById('productInput').value = names;
+  generateMarketing();
 }
 
 async function generateMarketing() {
   if(!cfg.ai){showMsg('Add your API key in Settings first!','error');return;}
-  var products=selectedProducts.length>0?selectedProducts:allProducts.slice(0,3);
-  if(products.length===0){showMsg('Find products first!','error');return;}
+  var input = document.getElementById('productInput').value.trim();
+  if(!input){showMsg('Enter a product name or URL first!','error');return;}
   document.getElementById('marketingLoading').style.display='block';
-  document.getElementById('marketingContent').innerHTML='';
+  document.getElementById('marketingOutput').innerHTML='';
   document.getElementById('marketingBtn').disabled=true;
   try {
-    var productList=products.slice(0,5).map(function(p){return p.name;}).join(', ');
-    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:2000,system:'You are a viral social media marketing expert for dropshipping stores. Create content that is engaging, trendy and drives sales.',messages:[{role:'user',content:'Generate marketing content for these trending products: '+productList+'\n\nFor each product provide:\n1. 🎵 TikTok script (30 sec, hook + demo + CTA)\n2. 📸 Instagram caption + 10 hashtags\n3. 📘 Facebook ad copy (headline + body + CTA)\n\nMake it viral and engaging! Use product names as headers.'}]})});
+    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:3000,system:'You are a viral social media marketing expert specializing in dropshipping. Create highly engaging, conversion-focused marketing content.',messages:[{role:'user',content:'Create complete marketing content for this product: '+input+'\n\nProvide ALL of the following sections:\n\n🎵 TIKTOK SCRIPT (30 seconds)\nHook (first 3 seconds to stop scroll), Demo description, Call to action\n\n📸 INSTAGRAM CAPTION\nEngaging caption with emojis + 15 relevant hashtags\n\n📘 FACEBOOK AD\nHeadline + Body copy + Call to action button text\n\n🛍️ SHOPIFY DESCRIPTION\nSEO-optimized product description with bullet points\n\n📧 EMAIL SUBJECT LINE\n3 options for email marketing subject lines\n\nMake everything viral, engaging and sales-focused!'}]})});
     var data=await res.json();
     var content=data.content&&data.content[0]?data.content[0].text:'';
-    document.getElementById('marketingContent').innerHTML='<div class="marketing-card"><div class="marketing-title">📱 YOUR MARKETING CONTENT</div><div class="marketing-content">'+content+'</div><button class="copy-btn" onclick="navigator.clipboard.writeText(document.querySelector(\'.marketing-content\').textContent).then(function(){alert(\'Copied!\');})">📋 COPY ALL</button></div>';
-  } catch(e){showMsg('Failed to generate content','error');}
+    
+    // Split content into sections
+    document.getElementById('marketingOutput').innerHTML='<div class="marketing-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><div style="color:#00e5a0;font-size:11px;letter-spacing:2px">📣 MARKETING CONTENT FOR: '+input.substring(0,50).toUpperCase()+'</div><button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById(\'fullContent\').textContent).then(function(){alert(\'All content copied!\');})">📋 COPY ALL</button></div><div id="fullContent" class="marketing-content">'+content+'</div></div>';
+  } catch(e){showMsg('Failed to generate. Check your API key.','error');}
   finally{document.getElementById('marketingLoading').style.display='none';document.getElementById('marketingBtn').disabled=false;}
 }
 </script>
