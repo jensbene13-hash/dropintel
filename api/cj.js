@@ -7,7 +7,7 @@ export default async function handler(req, res) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const { query, cjKey, addToList } = body;
     const shortQuery = (query || '').split(' ').slice(0, 3).join(' ');
-    const searchUrl = `https://cjdropshipping.com/list-detail.html?searchkey=${encodeURIComponent(shortQuery)}`;
+    const searchUrl = `https://cjdropshipping.com/list/wholesale-all-categories-l-all.html?searchValue=${encodeURIComponent(shortQuery)}`;
 
     const tokenRes = await fetch('https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken', {
       method: 'POST',
@@ -26,12 +26,7 @@ export default async function handler(req, res) {
     const searchData = await searchRes.json();
     const product = searchData.data?.list?.[0];
 
-    if (!product) {
-      return res.status(200).json({ imageUrl: null, supplierUrl: searchUrl, productId: null });
-    }
-
-    // Add to My Products if requested
-    if (addToList && product.pid) {
+    if (addToList && product?.pid) {
       await fetch('https://developers.cjdropshipping.com/api2.0/v1/product/addToMyProduct', {
         method: 'POST',
         headers: { 'CJ-Access-Token': token, 'Content-Type': 'application/json' },
@@ -40,17 +35,17 @@ export default async function handler(req, res) {
     }
 
     res.status(200).json({
-      imageUrl: product.productImage || null,
+      imageUrl: product?.productImage || null,
       supplierUrl: searchUrl,
-      productId: product.pid,
-      productName: product.productNameEn,
-      price: product.sellPrice
+      productId: product?.pid || null,
+      productName: product?.productNameEn || null,
+      price: product?.sellPrice || null
     });
 
   } catch (error) {
     res.status(200).json({ 
       imageUrl: null, 
-      supplierUrl: `https://cjdropshipping.com/list-detail.html?searchkey=${encodeURIComponent((query||'').split(' ').slice(0,3).join(' '))}`,
+      supplierUrl: `https://cjdropshipping.com/list/wholesale-all-categories-l-all.html?searchValue=${encodeURIComponent((query||'').split(' ').slice(0,3).join(' '))}`,
       error: error.message 
     });
   }
