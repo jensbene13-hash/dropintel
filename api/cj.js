@@ -7,7 +7,6 @@ export default async function handler(req, res) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const { query, cjKey } = body;
     const shortQuery = (query || '').split(' ').slice(0, 3).join(' ');
-    const searchUrl = `https://cjdropshipping.com/list?searchkey=${encodeURIComponent(shortQuery)}`;
 
     const tokenRes = await fetch('https://developers.cjdropshipping.com/api2.0/v1/authentication/getAccessToken', {
       method: 'POST',
@@ -16,9 +15,12 @@ export default async function handler(req, res) {
     });
     const tokenData = await tokenRes.json();
     const token = tokenData.data?.accessToken;
-
     if (!token) {
-      return res.status(200).json({ imageUrl: null, supplierUrl: searchUrl, productId: null });
+      return res.status(200).json({ 
+        imageUrl: null, 
+        supplierUrl: `https://cjdropshipping.com/list?searchkey=${encodeURIComponent(shortQuery)}`,
+        productId: null 
+      });
     }
 
     const searchRes = await fetch(`https://developers.cjdropshipping.com/api2.0/v1/product/list?productNameEn=${encodeURIComponent(shortQuery)}&pageNum=1&pageSize=5&orderBy=ORDERS`, {
@@ -27,16 +29,38 @@ export default async function handler(req, res) {
     const searchData = await searchRes.json();
     const product = searchData.data?.list?.[0];
 
-    res.status(200).json({
-      imageUrl: product?.productImage || null,
-      supplierUrl: searchUrl,
-      productId: product?.pid || null,
-      productName: product?.productNameEn || null,
-      price: product?.sellPrice || null
-    });
+    if (product) {
+      // Get full product details to get the SKU for URL
+      const detailRes = await fetch(`https://developers.cjdropshipping.com/api2.0/v1/product/query?pid=${product.pid}`, {
+        headers: { 'CJ-Access-Token': token }
+      });
+      const detailData = await detailRes.json();
+      const sku = detailData.data?.productSku || product.productSku;
+      
+      // Build direct product URL using SKU
+      const productUrl = sku 
+        ? `https://cjdropshipping.com/product/${sku}.html`
+        : `https://cjdropshipping.com/list?searchkey=${encodeURIComponent(shortQuery)}`;
 
+      res.status(200).json({
+        imageUrl: product.productImage || null,
+        supplierUrl: productUrl,
+        productId: product.pid,
+        productName: product.productNameEn,
+        price: product.sellPrice
+      });
+    } else {
+      res.status(200).json({ 
+        imageUrl: null, 
+        supplierUrl: `https://cjdropshipping.com/list?searchkey=${encodeURIComponent(shortQuery)}`,
+        productId: null 
+      });
+    }
   } catch (error) {
-    const fallback = `https://cjdropshipping.com/list?searchkey=${encodeURIComponent((req.body?.query||'').split(' ').slice(0,3).join(' '))}`;
-    res.status(200).json({ imageUrl: null, supplierUrl: fallback, error: error.message });
+    res.status(200).json({ 
+      imageUrl: null, 
+      supplierUrl: `https://cjdropshipping.com/list?searchkey=${encodeURIComponent((query||'').split(' ').slice(0,3).join(' '))}`,
+      error: error.message 
+    });
   }
 }
