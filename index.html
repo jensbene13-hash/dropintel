@@ -31,8 +31,6 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 14px; }
 .status-dot.red { background: #ff4d4d; }
 .section { display: none; }
 .section.active { display: block; }
-.error-box { background: #1a0d0d; border: 1px solid #ff4d4d30; border-radius: 4px; padding: 14px; margin-bottom: 16px; color: #ff4d4d; font-size: 11px; }
-.success-box { background: #0d1a0d; border: 1px solid #00e5a030; border-radius: 4px; padding: 14px; margin-bottom: 16px; color: #00e5a0; font-size: 11px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 20px; }
 .stat-card { background: #111118; border-radius: 4px; padding: 12px 14px; }
 .stat-val { font-size: 20px; font-weight: 900; }
@@ -45,7 +43,7 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 14px; }
 .dots { display: flex; justify-content: center; gap: 6px; }
 .dot { width: 6px; height: 6px; background: #00e5a0; border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 0%,100%{opacity:0.2;transform:scale(1)} 50%{opacity:1;transform:scale(1.4)} }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .card { background: #0e0e16; border: 1px solid #1a1a2e; border-radius: 4px; padding: 16px; transition: all 0.2s; position: relative; overflow: hidden; }
 .card:hover { border-color: #00e5a030; }
 .card.selected { border-color: #00e5a0; background: #0d1a0d; }
@@ -121,7 +119,7 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <div id="stats"></div>
 <div class="filters" id="filters" style="display:none"></div>
 <div class="loading" id="loading" style="display:none">
-<div class="loading-text">SCANNING MARKET TRENDS...</div>
+<div class="loading-text">SCANNING REAL-TIME TRENDS...</div>
 <div class="dots">
 <div class="dot" style="animation-delay:0s"></div>
 <div class="dot" style="animation-delay:0.2s"></div>
@@ -140,18 +138,16 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <div style="color:#00e5a0;font-size:11px;letter-spacing:3px;margin-bottom:8px">🛍️ LIST PRODUCTS TO SHOPIFY</div>
 <div style="color:#444;font-size:12px;margin-bottom:16px">Select products from Research tab, then use the buttons below!</div>
 <div id="selectedCount" style="color:#ffd700;font-size:12px;margin-bottom:16px;letter-spacing:1px">0 PRODUCTS SELECTED</div>
-
 <div style="background:#0d1a0d;border:1px solid #00e5a020;border-radius:4px;padding:16px;margin-bottom:16px;">
 <div style="color:#00e5a0;font-size:10px;letter-spacing:2px;margin-bottom:8px">RECOMMENDED WORKFLOW:</div>
 <div style="color:#555;font-size:11px;line-height:1.8">
-1️⃣ Click <strong style="color:#ffd700">"ADD TO CJ SOURCING LIST"</strong> — adds selected products to CJ<br>
+1️⃣ Click <strong style="color:#ffd700">"ADD TO CJ"</strong> — finds products on CJ and adds to your list<br>
 2️⃣ Open CJ app in Shopify → click <strong style="color:#ffd700">"List to Store"</strong> for each product<br>
-3️⃣ Products appear in your store with real images automatically!
+3️⃣ Products appear with real images automatically!
 </div>
 </div>
-
-<button class="cj-btn" onclick="addAllToCJ()" id="cjBtn">📦 ADD ALL SELECTED TO CJ SOURCING LIST</button>
-<button class="auto-btn" onclick="listAllProducts()" id="listBtn">🚀 LIST DIRECTLY TO SHOPIFY (NO IMAGES)</button>
+<button class="cj-btn" onclick="addAllToCJ()" id="cjBtn">📦 ADD ALL SELECTED TO CJ</button>
+<button class="auto-btn" onclick="listAllProducts()" id="listBtn">🚀 LIST DIRECTLY TO SHOPIFY</button>
 </div>
 <div class="progress-box" id="progressBox" style="display:none">
 <div style="color:#00e5a0;font-size:10px;letter-spacing:3px;margin-bottom:16px">PROGRESS</div>
@@ -290,7 +286,7 @@ async function fetchProducts() {
   productSupplierData={};
   var today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   try {
-    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(short 2-3 word generic search term to find this product type on CJDropshipping). Return exactly 20 products.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins.'}]})});
+    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(short 2-3 word CJ search term). Return exactly 20 DIFFERENT products each time, vary the categories and types.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins. Focus on what is actually trending RIGHT NOW based on current social media and consumer demand. Make sure these are different from common suggestions.'}]})});
     var data=await res.json();
     if(data.error){showMsg('Error: '+data.error.message,'error');return;}
     var text=data.content.map(function(b){return b.text||'';}).join('').replace(/```json|```/g,'').trim();
@@ -311,16 +307,15 @@ async function loadSupplierData() {
       var res=await fetch('/api/cj',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:p.searchTerm||p.name,cjKey:cfg.cjKey})});
       var data=await res.json();
       productSupplierData[p.id]={
-        imageUrl:data.imageUrl||null,
         supplierUrl:data.supplierUrl||null,
         cjPrice:data.price||null,
         productName:data.productName||null,
         found:!!data.productId
       };
     } catch(e){
-      productSupplierData[p.id]={imageUrl:null,supplierUrl:null,found:false};
+      productSupplierData[p.id]={supplierUrl:null,found:false};
     }
-    if(i%4===0) renderGrid();
+    if(i%5===0) renderGrid();
   }
   renderGrid();
 }
@@ -354,18 +349,16 @@ function renderGrid() {
   document.getElementById('grid').innerHTML=filtered.map(function(p){
     var c=tc(p.demandTrend),sel=selectedProducts.some(function(s){return s.id===p.id;});
     var sd=productSupplierData[p.id];
-    var imageUrl=sd&&sd.imageUrl?sd.imageUrl:null;
-    var supplierUrl=sd&&sd.supplierUrl?sd.supplierUrl:('https://cjdropshipping.com/search?q='+encodeURIComponent(p.searchTerm||p.name));
+    var supplierUrl=sd&&sd.supplierUrl?sd.supplierUrl:('https://cjdropshipping.com/list/wholesale-all-categories-l-all.html?searchValue='+encodeURIComponent((p.searchTerm||p.name).split(' ').slice(0,3).join(' ')));
     var cjFound=sd&&sd.found;
-    var cjName=sd&&sd.productName?'<div style="color:#ffd700;font-size:9px;margin-bottom:6px;letter-spacing:1px">CJ: '+sd.productName.substring(0,40)+'...</div>':'';
-    var imgHtml=imageUrl?'<img src="'+imageUrl+'" style="width:100%;height:160px;object-fit:cover;border-radius:3px;margin-bottom:10px;" onerror="this.style.display=\'none\'">':'<div style="width:100%;height:60px;background:#111;border-radius:3px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:#333;font-size:9px;letter-spacing:1px">'+(sd?'NO IMAGE FOUND':'LOADING...')+'</div>';
-    return '<div class="card'+(sel?' selected':'')+'">'+imgHtml+(cjFound?'<span class="cj-badge">✓ FOUND ON CJ</span>':'')+cjName+'<div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div><div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><a href="'+supplierUrl+'" target="_blank" class="supplier-btn">🛒 VIEW ON CJDROPSHIPPING</a><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
+    var cjName=sd&&sd.productName?'<div style="color:#ffd700;font-size:9px;margin-bottom:6px;letter-spacing:1px">📦 '+sd.productName.substring(0,45)+'...</div>':'';
+    return '<div class="card'+(sel?' selected':'')+'"><div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div>'+(cjFound?'<span class="cj-badge">✓ FOUND ON CJ</span>':'')+cjName+'<div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><a href="'+supplierUrl+'" target="_blank" class="supplier-btn">🛒 SOURCE ON CJDROPSHIPPING</a><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
   }).join('');
 }
 
 async function addAllToCJ() {
   if(!cfg.cjKey){showMsg('Add your CJ key in Settings!','error');return;}
-  if(selectedProducts.length===0){showMsg('Select products first in the Research tab!','error');return;}
+  if(selectedProducts.length===0){showMsg('Select products first!','error');return;}
   document.getElementById('cjBtn').disabled=true;
   document.getElementById('progressBox').style.display='block';
   var steps=selectedProducts.map(function(p){return {id:p.id,name:p.name,status:'pending'};});
@@ -383,7 +376,7 @@ async function addAllToCJ() {
     }catch(e){steps[i].status='error';}
     renderProgress(steps);
   }
-  showMsg('Added '+count+' products to CJ Sourcing List! Open CJ app in Shopify → click List to Store for each product 🎉','success');
+  showMsg('Added '+count+' products to CJ! Open CJ app in Shopify → List to Store 🎉','success');
   document.getElementById('cjBtn').disabled=false;
 }
 
@@ -401,11 +394,9 @@ async function listAllProducts() {
     renderProgress(steps);
     try {
       var desc=await generateDescription(p);
-      var sd=productSupplierData[p.id]||{};
-      var imageUrl=sd.imageUrl||null;
       var price=p.sellingPrice.replace(/[^0-9.]/g,'');
       var comparePrice=(parseFloat(price)*1.4).toFixed(2);
-      var productData={product:{title:p.name,body_html:'<p>'+desc+'</p>',vendor:'The Shop',product_type:p.category,tags:p.category+',dropshipping,trending',status:'active',variants:[{price:price,compare_at_price:comparePrice,inventory_management:'shopify',inventory_quantity:999}],images:imageUrl?[{src:imageUrl}]:[]}};
+      var productData={product:{title:p.name,body_html:'<p>'+desc+'</p>',vendor:'The Shop',product_type:p.category,tags:p.category+',dropshipping,trending',status:'active',variants:[{price:price,compare_at_price:comparePrice,inventory_management:'shopify',inventory_quantity:999}]}};
       var res2=await fetch('/api/shopify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:cfg.shopToken,domain:cfg.shopDomain,product:productData})});
       var data2=await res2.json();
       if(data2.product){steps[i].status='done';successCount++;}
@@ -440,7 +431,7 @@ async function generateMarketing() {
   document.getElementById('marketingBtn').disabled=true;
   try {
     var productList=products.slice(0,5).map(function(p){return p.name;}).join(', ');
-    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:2000,system:'You are a social media marketing expert for dropshipping stores.',messages:[{role:'user',content:'Generate marketing content for: '+productList+'\n\nFor each product:\n1. TikTok script (30 sec)\n2. Instagram caption + hashtags\n3. Facebook ad copy\n\nUse product names as headers.'}]})});
+    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:2000,system:'You are a viral social media marketing expert for dropshipping stores. Create content that is engaging, trendy and drives sales.',messages:[{role:'user',content:'Generate marketing content for these trending products: '+productList+'\n\nFor each product provide:\n1. 🎵 TikTok script (30 sec, hook + demo + CTA)\n2. 📸 Instagram caption + 10 hashtags\n3. 📘 Facebook ad copy (headline + body + CTA)\n\nMake it viral and engaging! Use product names as headers.'}]})});
     var data=await res.json();
     var content=data.content&&data.content[0]?data.content[0].text:'';
     document.getElementById('marketingContent').innerHTML='<div class="marketing-card"><div class="marketing-title">📱 YOUR MARKETING CONTENT</div><div class="marketing-content">'+content+'</div><button class="copy-btn" onclick="navigator.clipboard.writeText(document.querySelector(\'.marketing-content\').textContent).then(function(){alert(\'Copied!\');})">📋 COPY ALL</button></div>';
