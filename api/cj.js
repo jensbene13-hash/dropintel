@@ -14,42 +14,44 @@ export default async function handler(req, res) {
     });
     const tokenData = await tokenRes.json();
     const token = tokenData.data?.accessToken;
+    if (!token) { res.status(200).json({ imageUrl: null, supplierUrl: `https://cjdropshipping.com/search?q=${encodeURIComponent(query)}`, productId: null }); return; }
 
-    if (!token) {
-      res.status(200).json({ imageUrl: null, supplierUrl: null, productId: null });
-      return;
-    }
-
-    // Try exact search first then fallback to broader
-    const searches = [query, query.split(' ').slice(0,3).join(' '), query.split(' ')[0]];
+    // Use just first 2 keywords for better matching
+    const shortQuery = query.split(' ').slice(0, 2).join(' ');
     
-    for (const searchTerm of searches) {
-      const searchRes = await fetch(`https://developers.cjdropshipping.com/api2.0/v1/product/list?productNameEn=${encodeURIComponent(searchTerm)}&pageNum=1&pageSize=5&orderBy=ORDERS`, {
+    const searchRes = await fetch(`https://developers.cjdropshipping.com/api2.0/v1/product/list?productNameEn=${encodeURIComponent(shortQuery)}&pageNum=1&pageSize=10&orderBy=ORDERS`, {
+      headers: { 'CJ-Access-Token': token }
+    });
+    const searchData = await searchRes.json();
+    const products = searchData.data?.list || [];
+
+    if (products.length === 0) {
+      // Try single word
+      const oneWord = query.split(' ')[0];
+      const res2 = await fetch(`https://developers.cjdropshipping.com/api2.0/v1/product/list?productNameEn=${encodeURIComponent(oneWord)}&pageNum=1&pageSize=5&orderBy=ORDERS`, {
         headers: { 'CJ-Access-Token': token }
       });
-      const searchData = await searchRes.json();
-      const products = searchData.data?.list || [];
-      
-      // Find best match - product name contains our search term
-      const bestMatch = products.find(p => 
-        p.productNameEn && p.productNameEn.toLowerCase().includes(searchTerm.toLowerCase().split(' ')[0])
-      ) || products[0];
-
-      if (bestMatch) {
+      const data2 = await res2.json();
+      const p = data2.data?.list?.[0];
+      if (p) {
         return res.status(200).json({
-          imageUrl: bestMatch.productImage || null,
-          supplierUrl: `https://cjdropshipping.com/product/${bestMatch.pid}.html`,
-          productId: bestMatch.pid,
-          productName: bestMatch.productNameEn,
-          price: bestMatch.sellPrice
+          imageUrl: p.productImage || null,
+          supplierUrl: `https://cjdropshipping.com/product/${p.pid}.html`,
+          productId: p.pid,
+          productName: p.productNameEn,
+          price: p.sellPrice
         });
       }
+      return res.status(200).json({ imageUrl: null, supplierUrl: `https://cjdropshipping.com/search?q=${encodeURIComponent(query)}`, productId: null });
     }
 
-    res.status(200).json({ 
-      imageUrl: null, 
-      supplierUrl: `https://cjdropshipping.com/search?q=${encodeURIComponent(query)}`,
-      productId: null 
+    const best = products[0];
+    res.status(200).json({
+      imageUrl: best.productImage || null,
+      supplierUrl: `https://cjdropshipping.com/product/${best.pid}.html`,
+      productId: best.pid,
+      productName: best.productNameEn,
+      price: best.sellPrice
     });
   } catch (error) {
     res.status(200).json({ imageUrl: null, supplierUrl: null, error: error.message });
