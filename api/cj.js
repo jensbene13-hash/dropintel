@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     });
     const tokenData = await tokenRes.json();
     const token = tokenData.data?.accessToken;
-    if (!token) { res.status(200).json({ imageUrl: null, supplierUrl: null, productId: null, debug: tokenData }); return; }
+    if (!token) { res.status(200).json({ imageUrl: null, supplierUrl: null, productId: null }); return; }
 
     const shortQuery = query.split(' ').slice(0, 2).join(' ');
     const searchRes = await fetch(`https://developers.cjdropshipping.com/api2.0/v1/product/list?productNameEn=${encodeURIComponent(shortQuery)}&pageNum=1&pageSize=5&orderBy=ORDERS`, {
@@ -24,36 +24,28 @@ export default async function handler(req, res) {
     const product = searchData.data?.list?.[0];
 
     if (!product) {
-      return res.status(200).json({ imageUrl: null, supplierUrl: `https://cjdropshipping.com/search?q=${encodeURIComponent(query)}`, productId: null });
+      return res.status(200).json({ 
+        imageUrl: null, 
+        supplierUrl: `https://cjdropshipping.com/search?q=${encodeURIComponent(query)}`, 
+        productId: null 
+      });
     }
 
-    // Add to sourcing list if requested
     if (addToList && product.pid) {
-      const listRes = await fetch('https://developers.cjdropshipping.com/api2.0/v1/product/addToSourcingList', {
+      // Correct endpoint for adding to sourcing list
+      await fetch('https://developers.cjdropshipping.com/api2.0/v1/product/sourcing/create', {
         method: 'POST',
         headers: { 
           'CJ-Access-Token': token,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ pid: product.pid })
-      });
-      const listData = await listRes.json();
-      console.log('Add to list response:', JSON.stringify(listData));
-      
-      // Also try listing directly to Shopify store via CJ
-      const storeListRes = await fetch('https://developers.cjdropshipping.com/api2.0/v1/product/addToMyShopify', {
-        method: 'POST',
-        headers: {
-          'CJ-Access-Token': token,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({ 
-          pid: product.pid,
-          shopifyStoreId: 'bmaq7t-p1.myshopify.com'
+          productName: product.productNameEn,
+          productImage: product.productImage,
+          productUrl: `https://cjdropshipping.com/product/${product.pid}.html`,
+          price: product.sellPrice
         })
       });
-      const storeData = await storeListRes.json();
-      console.log('Store list response:', JSON.stringify(storeData));
     }
 
     res.status(200).json({
