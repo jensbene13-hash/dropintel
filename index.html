@@ -65,8 +65,10 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 14px; }
 .select-btn.selected { background: #00e5a0; color: #000; font-weight: 700; }
 .supplier-btn { background: #ff4d4d15; color: #ff4d4d; border: 1px solid #ff4d4d30; padding: 6px 10px; border-radius: 2px; font-family: 'Courier New', monospace; font-size: 9px; letter-spacing: 1px; margin-top: 6px; width: 100%; text-decoration: none; display: block; text-align: center; }
 .cj-badge { background: #ffd70020; color: #ffd700; border: 1px solid #ffd70030; padding: 3px 8px; border-radius: 2px; font-size: 8px; letter-spacing: 1px; display: inline-block; margin-bottom: 6px; }
-.auto-btn { background: linear-gradient(135deg, #ff4d4d, #cc0000); color: #fff; border: none; padding: 14px 32px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 13px; letter-spacing: 3px; width: 100%; margin-bottom: 20px; }
+.auto-btn { background: linear-gradient(135deg, #ff4d4d, #cc0000); color: #fff; border: none; padding: 14px 32px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 13px; letter-spacing: 3px; width: 100%; margin-bottom: 10px; }
 .auto-btn:disabled { background: #1a1a2e; color: #444; cursor: not-allowed; }
+.cj-btn { background: linear-gradient(135deg, #ffd700, #cc9900); color: #000; border: none; padding: 14px 32px; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; font-weight: 700; font-size: 13px; letter-spacing: 3px; width: 100%; margin-bottom: 10px; }
+.cj-btn:disabled { background: #1a1a2e; color: #444; cursor: not-allowed; }
 .progress-box { background: #0d0d16; border: 1px solid #00e5a020; border-radius: 6px; padding: 20px; margin-bottom: 20px; }
 .progress-step { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #111; font-size: 12px; }
 .progress-step:last-child { border-bottom: none; }
@@ -136,12 +138,23 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 <div id="section-lister" class="section">
 <div style="margin-bottom:20px">
 <div style="color:#00e5a0;font-size:11px;letter-spacing:3px;margin-bottom:8px">🛍️ LIST PRODUCTS TO SHOPIFY</div>
-<div style="color:#444;font-size:12px;margin-bottom:16px">Select products from Research tab, then list them to Shopify with real CJ images!</div>
+<div style="color:#444;font-size:12px;margin-bottom:16px">Select products from Research tab, then use the buttons below!</div>
 <div id="selectedCount" style="color:#ffd700;font-size:12px;margin-bottom:16px;letter-spacing:1px">0 PRODUCTS SELECTED</div>
-<button class="auto-btn" onclick="listAllProducts()" id="listBtn">🚀 LIST ALL SELECTED PRODUCTS TO SHOPIFY</button>
+
+<div style="background:#0d1a0d;border:1px solid #00e5a020;border-radius:4px;padding:16px;margin-bottom:16px;">
+<div style="color:#00e5a0;font-size:10px;letter-spacing:2px;margin-bottom:8px">RECOMMENDED WORKFLOW:</div>
+<div style="color:#555;font-size:11px;line-height:1.8">
+1️⃣ Click <strong style="color:#ffd700">"ADD TO CJ SOURCING LIST"</strong> — adds selected products to CJ<br>
+2️⃣ Open CJ app in Shopify → click <strong style="color:#ffd700">"List to Store"</strong> for each product<br>
+3️⃣ Products appear in your store with real images automatically!
+</div>
+</div>
+
+<button class="cj-btn" onclick="addAllToCJ()" id="cjBtn">📦 ADD ALL SELECTED TO CJ SOURCING LIST</button>
+<button class="auto-btn" onclick="listAllProducts()" id="listBtn">🚀 LIST DIRECTLY TO SHOPIFY (NO IMAGES)</button>
 </div>
 <div class="progress-box" id="progressBox" style="display:none">
-<div style="color:#00e5a0;font-size:10px;letter-spacing:3px;margin-bottom:16px">LISTING PROGRESS</div>
+<div style="color:#00e5a0;font-size:10px;letter-spacing:3px;margin-bottom:16px">PROGRESS</div>
 <div id="progressSteps"></div>
 </div>
 </div>
@@ -183,7 +196,7 @@ footer { margin-top: 40px; text-align: center; color: #111; font-size: 9px; lett
 </div>
 <div class="setup-field">
 <label>CJDROPSHIPPING API KEY</label>
-<input type="text" id="cjKey" placeholder="CJ1234567">
+<input type="text" id="cjKey" placeholder="CJ1234567@api@...">
 </div>
 </div>
 <button class="btn-primary" onclick="saveSettings()">SAVE & CONNECT →</button>
@@ -260,7 +273,7 @@ function showMsg(msg, type) {
   box.style.color = type==='success'?'#00e5a0':'#ff4d4d';
   box.textContent = msg;
   box.style.display = 'block';
-  setTimeout(function() { box.style.display='none'; }, 4000);
+  setTimeout(function() { box.style.display='none'; }, 5000);
 }
 
 function tc(t){return t==='hot'?'#ff4d4d':t==='rising'?'#00e5a0':'#ffd700';}
@@ -277,7 +290,7 @@ async function fetchProducts() {
   productSupplierData={};
   var today=new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
   try {
-    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(short 2-4 word search term for finding this exact product on CJDropshipping). Return exactly 20 products.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins.'}]})});
+    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':cfg.ai},body:JSON.stringify({model:'claude-haiku-4-5',max_tokens:4000,system:'You are a dropshipping expert. Respond ONLY with a valid JSON array, no markdown, no backticks. Each object: id(number), name, category(Home & Kitchen/Beauty & Personal Care/Tech & Gadgets/Fitness & Sports/Pet Supplies/Fashion & Accessories/Kids & Toys), trendScore(1-100), estimatedProfit, supplierPrice, sellingPrice, demandTrend(rising/hot/stable), whyTrending, targetAudience, platforms(array), searchTerm(short 2-3 word generic search term to find this product type on CJDropshipping). Return exactly 20 products.',messages:[{role:'user',content:'Today is '+today+'. Give me 20 trending dropshipping products with high profit margins.'}]})});
     var data=await res.json();
     if(data.error){showMsg('Error: '+data.error.message,'error');return;}
     var text=data.content.map(function(b){return b.text||'';}).join('').replace(/```json|```/g,'').trim();
@@ -301,12 +314,13 @@ async function loadSupplierData() {
         imageUrl:data.imageUrl||null,
         supplierUrl:data.supplierUrl||null,
         cjPrice:data.price||null,
+        productName:data.productName||null,
         found:!!data.productId
       };
     } catch(e){
       productSupplierData[p.id]={imageUrl:null,supplierUrl:null,found:false};
     }
-    if(i%5===0) renderGrid();
+    if(i%4===0) renderGrid();
   }
   renderGrid();
 }
@@ -343,9 +357,34 @@ function renderGrid() {
     var imageUrl=sd&&sd.imageUrl?sd.imageUrl:null;
     var supplierUrl=sd&&sd.supplierUrl?sd.supplierUrl:('https://cjdropshipping.com/search?q='+encodeURIComponent(p.searchTerm||p.name));
     var cjFound=sd&&sd.found;
-    var imgHtml=imageUrl?'<img src="'+imageUrl+'" style="width:100%;height:160px;object-fit:cover;border-radius:3px;margin-bottom:10px;" onerror="this.style.display=\'none\'">':(sd&&!sd.found?'<div style="width:100%;height:80px;background:#111;border-radius:3px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:#333;font-size:9px;letter-spacing:1px">LOADING IMAGE...</div>':'<div style="width:100%;height:80px;background:#111;border-radius:3px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:#333;font-size:9px;letter-spacing:1px">LOADING...</div>');
-    return '<div class="card'+(sel?' selected':'')+'">'+imgHtml+(cjFound?'<span class="cj-badge">✓ FOUND ON CJ</span>':'')+'<div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div><div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><a href="'+supplierUrl+'" target="_blank" class="supplier-btn">🛒 SOURCE ON CJDROPSHIPPING</a><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
+    var cjName=sd&&sd.productName?'<div style="color:#ffd700;font-size:9px;margin-bottom:6px;letter-spacing:1px">CJ: '+sd.productName.substring(0,40)+'...</div>':'';
+    var imgHtml=imageUrl?'<img src="'+imageUrl+'" style="width:100%;height:160px;object-fit:cover;border-radius:3px;margin-bottom:10px;" onerror="this.style.display=\'none\'">':'<div style="width:100%;height:60px;background:#111;border-radius:3px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:#333;font-size:9px;letter-spacing:1px">'+(sd?'NO IMAGE FOUND':'LOADING...')+'</div>';
+    return '<div class="card'+(sel?' selected':'')+'">'+imgHtml+(cjFound?'<span class="cj-badge">✓ FOUND ON CJ</span>':'')+cjName+'<div class="trend-bar" style="width:'+p.trendScore+'%;background:linear-gradient(90deg,'+c+',transparent)"></div><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span class="cat-tag">'+p.category.toUpperCase()+'</span><span>'+te(p.demandTrend)+'</span></div><div class="card-title">'+p.name+'</div><div class="card-why">'+p.whyTrending+'</div><div class="prices"><div><div class="price-val" style="color:#ff4d4d">'+p.supplierPrice+'</div><div class="price-label">COST</div></div><div><div class="price-val" style="color:#00e5a0">'+p.sellingPrice+'</div><div class="price-label">SELL</div></div><div><div class="price-val" style="color:#ffd700">'+p.estimatedProfit+'</div><div class="price-label">PROFIT</div></div></div><div class="card-footer"><div>'+(p.platforms||[]).slice(0,2).map(function(pl){return '<span class="platform-tag">'+pl.toUpperCase()+'</span>';}).join('')+'</div><div><div class="score-bar"><div class="score-fill" style="width:'+p.trendScore+'%;background:'+c+'"></div></div><span class="score-num" style="color:'+c+'">'+p.trendScore+'</span></div></div><a href="'+supplierUrl+'" target="_blank" class="supplier-btn">🛒 VIEW ON CJDROPSHIPPING</a><button class="select-btn'+(sel?' selected':'')+'" onclick="toggleSelect('+p.id+')">'+(sel?'✓ SELECTED — REMOVE':'+ SELECT FOR SHOPIFY')+'</button></div>';
   }).join('');
+}
+
+async function addAllToCJ() {
+  if(!cfg.cjKey){showMsg('Add your CJ key in Settings!','error');return;}
+  if(selectedProducts.length===0){showMsg('Select products first in the Research tab!','error');return;}
+  document.getElementById('cjBtn').disabled=true;
+  document.getElementById('progressBox').style.display='block';
+  var steps=selectedProducts.map(function(p){return {id:p.id,name:p.name,status:'pending'};});
+  renderProgress(steps);
+  var count=0;
+  for(var i=0;i<selectedProducts.length;i++){
+    var p=selectedProducts[i];
+    steps[i].status='active';
+    renderProgress(steps);
+    try{
+      var res=await fetch('/api/cj',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:p.searchTerm||p.name,cjKey:cfg.cjKey,addToList:true})});
+      var data=await res.json();
+      if(data.productId){steps[i].status='done';count++;}
+      else{steps[i].status='error';}
+    }catch(e){steps[i].status='error';}
+    renderProgress(steps);
+  }
+  showMsg('Added '+count+' products to CJ Sourcing List! Open CJ app in Shopify → click List to Store for each product 🎉','success');
+  document.getElementById('cjBtn').disabled=false;
 }
 
 async function listAllProducts() {
@@ -374,13 +413,13 @@ async function listAllProducts() {
     } catch(e){steps[i].status='error';}
     renderProgress(steps);
   }
-  showMsg('Listed '+successCount+' of '+selectedProducts.length+' products!','success');
+  showMsg('Listed '+successCount+' of '+selectedProducts.length+' products to Shopify!','success');
   document.getElementById('listBtn').disabled=false;
 }
 
 function renderProgress(steps) {
   document.getElementById('progressSteps').innerHTML=steps.map(function(s){
-    return '<div class="progress-step"><div class="step-icon">'+(s.status==='done'?'✅':s.status==='error'?'❌':s.status==='active'?'⏳':'⭕')+'</div><div class="step-text '+(s.status==='done'?'done':s.status==='active'?'active':'')+'" style="flex:1">'+s.name+'</div><div class="step-status '+(s.status==='done'?'done':s.status==='active'?'active':'')+'">'+(s.status==='done'?'LISTED ✓':s.status==='error'?'FAILED':s.status==='active'?'LISTING...':'WAITING')+'</div></div>';
+    return '<div class="progress-step"><div class="step-icon">'+(s.status==='done'?'✅':s.status==='error'?'❌':s.status==='active'?'⏳':'⭕')+'</div><div class="step-text '+(s.status==='done'?'done':s.status==='active'?'active':'')+'" style="flex:1">'+s.name+'</div><div class="step-status '+(s.status==='done'?'done':s.status==='active'?'active':'')+'">'+(s.status==='done'?'DONE ✓':s.status==='error'?'FAILED':s.status==='active'?'PROCESSING...':'WAITING')+'</div></div>';
   }).join('');
 }
 
