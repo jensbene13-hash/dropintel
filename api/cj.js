@@ -34,9 +34,14 @@ export default async function handler(req, res) {
       });
     }
 
+    // Build specific product URL using the search value of the actual product name
+    const specificUrl = product?.productNameEn 
+      ? `https://cjdropshipping.com/list/wholesale-all-categories-l-all.html?searchValue=${encodeURIComponent(product.productNameEn.split(' ').slice(0,4).join(' '))}`
+      : searchUrl;
+
     res.status(200).json({
       imageUrl: product?.productImage || null,
-      supplierUrl: searchUrl,
+      supplierUrl: specificUrl,
       productId: product?.pid || null,
       productName: product?.productNameEn || null,
       price: product?.sellPrice || null
