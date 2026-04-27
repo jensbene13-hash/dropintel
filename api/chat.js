@@ -7,48 +7,63 @@ export default async function handler(req, res) {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
     const { messages, system, model } = body;
     const apiKey = req.headers['x-api-key'];
-
-    // If this is a product research request, fetch real trend data first
-    const isProductResearch = messages?.[0]?.content?.includes('trending dropshipping products');
-    let trendData = '';
+    const isProductResearch = messages?.[0]?.content?.includes('trending dropshipping');
+    let trendContext = '';
 
     if (isProductResearch) {
       try {
-        // Fetch real trending data from multiple sources
-        const [amazonRes, redditRes, tiktokRes] = await Promise.allSettled([
+        const [amazonRes, redditRes, googleRes] = await Promise.allSettled([
+          // Amazon Best Sellers
           fetch('https://www.amazon.com/gp/bestsellers/', {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36' }
           }),
-          fetch('https://www.reddit.com/r/dropshipping/hot.json?limit=10', {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+          // Reddit dropshipping hot posts
+          fetch('https://www.reddit.com/r/dropshipping/hot.json?limit=15', {
+            headers: { 'User-Agent': 'DropIntelBot/1.0' }
           }),
-          fetch('https://www.reddit.com/r/entrepreneur/search.json?q=trending+products+2026&sort=hot&limit=5', {
+          // Google Trends RSS for shopping
+          fetch('https://trends.google.com/trends/trendingsearches/daily/rss?geo=US', {
             headers: { 'User-Agent': 'Mozilla/5.0' }
           })
         ]);
 
+        // Parse Reddit
         if (redditRes.status === 'fulfilled' && redditRes.value.ok) {
-          const redditData = await redditRes.value.json();
-          const posts = redditData?.data?.children?.slice(0, 5)
-            .map(p => p.data.title).join(', ');
-          if (posts) trendData += `Recent dropshipping discussions: ${posts}. `;
+          const data = await redditRes.value.json();
+          const posts = data?.data?.children
+            ?.filter(p => !p.data.stickied)
+            ?.slice(0, 8)
+            ?.map(p => p.data.title)
+            ?.join(' | ');
+          if (posts) trendContext += `HOT DROPSHIPPING TOPICS TODAY: ${posts}. `;
         }
 
-        if (tiktokRes.status === 'fulfilled' && tiktokRes.value.ok) {
-          const tiktokData = await tiktokRes.value.json();
-          const posts = tiktokData?.data?.children?.slice(0, 5)
-            .map(p => p.data.title).join(', ');
-          if (posts) trendData += `Trending entrepreneur topics: ${posts}. `;
+        // Parse Google Trends
+        if (googleRes.status === 'fulfilled' && googleRes.value.ok) {
+          const xml = await googleRes.value.text();
+          const matches = xml.match(/<title><!\[CDATA\[([^\]]+)\]\]>/g)?.slice(1, 10);
+          if (matches) {
+            const trends = matches.map(m => m.replace(/<title><!\[CDATA\[/, '').replace(/\]\]>/, '')).join(', ');
+            trendContext += `GOOGLE TRENDING SEARCHES IN US TODAY: ${trends}. `;
+          }
         }
-      } catch(e) {
-        // silently fail, still use AI knowledge
-      }
+
+        // Parse Amazon
+        if (amazonRes.status === 'fulfilled' && amazonRes.value.ok) {
+          const html = await amazonRes.value.text();
+          const titleMatches = html.match(/class="p13n-sc-truncate[^"]*"[^>]*>([^<]+)</g)?.slice(0, 10);
+          if (titleMatches) {
+            const products = titleMatches.map(m => m.replace(/class="[^"]*"[^>]*>/, '').replace(/<.*/, '').trim()).join(', ');
+            trendContext += `AMAZON BEST SELLERS RIGHT NOW: ${products}. `;
+          }
+        }
+
+      } catch(e) { console.log('Trend fetch error:', e.message); }
     }
 
-    // Inject trend data into the message if available
     const enhancedMessages = messages.map((m, i) => {
-      if (i === 0 && trendData) {
-        return { ...m, content: m.content + `\n\nReal-time trend context: ${trendData}` };
+      if (i === 0 && trendContext) {
+        return { ...m, content: m.content + `\n\nREAL-TIME DATA FROM TODAY:\n${trendContext}\n\nUse this real data to inform your product suggestions. Pick products that align with what people are actually searching and buying right now.` };
       }
       return m;
     });
@@ -60,12 +75,7 @@ export default async function handler(req, res) {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
-      body: JSON.stringify({ 
-        model, 
-        max_tokens: 4000, 
-        system, 
-        messages: enhancedMessages 
-      })
+      body: JSON.stringify({ model, max_tokens: 4000, system, messages: enhancedMessages })
     });
     const data = await response.json();
     res.status(200).json(data);
