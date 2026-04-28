@@ -1,3 +1,7 @@
+export const config = {
+  runtime: 'nodejs',
+}
+
 export default async function handler(req, res) {
   const API_KEY = process.env.ALPACA_API_KEY;
   const SECRET_KEY = process.env.ALPACA_SECRET_KEY;
