@@ -2,15 +2,11 @@
   "crons": [
     {
       "path": "/api/autosell",
-      "schedule": "45 14 * * 1-5"
+      "schedule": "*/15 14-21 * * 1-5"
     },
     {
       "path": "/api/autotrader",
-      "schedule": "0 15 * * 1-5"
-    },
-    {
-      "path": "/api/autosell",
-      "schedule": "45 20 * * 1-5"
+      "schedule": "*/15 14-21 * * 1-5"
     }
   ]
 }
