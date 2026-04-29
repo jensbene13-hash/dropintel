@@ -5,8 +5,7 @@ export default async function handler(req, res) {
   const symbol = req.query.symbol || 'AAPL';
 
   try {
-    // Get 50 days of historical data
-    const barsRes = await fetch(`${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&limit=50`, {
+    const barsRes = await fetch(`${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&limit=100&start=2025-01-01`, {
       headers: {
         'APCA-API-KEY-ID': API_KEY,
         'APCA-API-SECRET-KEY': SECRET_KEY,
@@ -16,16 +15,14 @@ export default async function handler(req, res) {
     const bars = barsData.bars;
 
     if (!bars || bars.length < 20) {
-      return res.status(200).json({ signal: 'HOLD', reason: 'Not enough data' });
+      return res.status(200).json({ signal: 'HOLD', reason: 'Not enough data', barsReceived: bars ? bars.length : 0 });
     }
 
     const closes = bars.map(b => b.c);
 
-    // Calculate 10 day and 20 day moving averages
     const ma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
     const ma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
 
-    // Calculate RSI
     const changes = closes.slice(-15).map((c, i, arr) => i === 0 ? 0 : c - arr[i - 1]);
     const gains = changes.map(c => c > 0 ? c : 0);
     const losses = changes.map(c => c < 0 ? Math.abs(c) : 0);
@@ -36,7 +33,6 @@ export default async function handler(req, res) {
 
     const currentPrice = closes[closes.length - 1];
 
-    // Generate signal
     let signal = 'HOLD';
     let reason = '';
 
@@ -58,6 +54,7 @@ export default async function handler(req, res) {
       rsi: rsi.toFixed(2),
       ma10: ma10.toFixed(2),
       ma20: ma20.toFixed(2),
+      barsReceived: bars.length,
     });
 
   } catch (error) {
