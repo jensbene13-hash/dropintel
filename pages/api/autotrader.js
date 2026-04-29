@@ -45,6 +45,22 @@ async function analyzeStock(symbol, apiKey, secretKey) {
   return { symbol, currentPrice, signal, score, rsi: rsi.toFixed(2), ma10: ma10.toFixed(2), ma20: ma20.toFixed(2) };
 }
 
+async function logTrade(trade) {
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
+
+  await fetch(`${SUPABASE_URL}/rest/v1/trades`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_SECRET_KEY,
+      'Authorization': `Bearer ${SUPABASE_SECRET_KEY}`,
+      'Prefer': 'return=minimal'
+    },
+    body: JSON.stringify(trade)
+  });
+}
+
 export default async function handler(req, res) {
   const API_KEY = process.env.ALPACA_API_KEY;
   const SECRET_KEY = process.env.ALPACA_SECRET_KEY;
@@ -85,6 +101,18 @@ export default async function handler(req, res) {
     });
 
     const order = await orderRes.json();
+
+    // Log trade to Supabase
+    await logTrade({
+      symbol: bestBuy.symbol,
+      action: 'BUY',
+      price: bestBuy.currentPrice,
+      shares: shares,
+      rsi: parseFloat(bestBuy.rsi),
+      ma10: parseFloat(bestBuy.ma10),
+      ma20: parseFloat(bestBuy.ma20),
+      score: bestBuy.score,
+    });
 
     res.status(200).json({
       message: `Placed BUY order for ${shares} shares of ${bestBuy.symbol}`,
