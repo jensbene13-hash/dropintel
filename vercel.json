@@ -19,6 +19,10 @@
     {
       "path": "/api/autosell",
       "schedule": "0 21 * * 1-5"
+    },
+    {
+      "path": "/api/learn",
+      "schedule": "0 21 * * 1-5"
     }
   ]
 }
