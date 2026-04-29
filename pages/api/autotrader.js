@@ -5,7 +5,7 @@ const WATCHLIST = [
 ];
 
 const MIN_TRADE = 10;
-const MAX_TRADE = 50;
+const MAX_TRADE = 200;
 
 async function analyzeStock(symbol, apiKey, secretKey) {
   const DATA_URL = 'https://data.alpaca.markets';
@@ -51,7 +51,6 @@ export default async function handler(req, res) {
   const BASE_URL = 'https://paper-api.alpaca.markets';
 
   try {
-    // Scan all stocks
     const results = await Promise.all(
       WATCHLIST.map(symbol => analyzeStock(symbol, API_KEY, SECRET_KEY))
     );
@@ -64,13 +63,11 @@ export default async function handler(req, res) {
       return res.status(200).json({ message: 'No strong buy signals found', signals });
     }
 
-    // Calculate how many shares to buy
     const shares = Math.floor(MAX_TRADE / bestBuy.currentPrice);
     if (shares < 1) {
       return res.status(200).json({ message: `${bestBuy.symbol} too expensive for current limits`, bestBuy, signals });
     }
 
-    // Place the trade
     const orderRes = await fetch(`${BASE_URL}/v2/orders`, {
       method: 'POST',
       headers: {
