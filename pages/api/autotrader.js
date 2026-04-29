@@ -7,7 +7,30 @@ const WATCHLIST = [
 const MIN_TRADE = 10;
 const MAX_TRADE = 200;
 
-async function analyzeStock(symbol, apiKey, secretKey) {
+async function getLearnings(supabaseUrl, supabaseKey) {
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/learnings?order=created_at.desc&limit=1`,
+      {
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${supabaseKey}`,
+        }
+      }
+    );
+    const data = await res.json();
+    if (data && data.length > 0) {
+      return {
+        maxRSI: parseFloat(data[0].recommended_max_rsi) || 70,
+        bestSymbol: data[0].best_symbol,
+        winRate: parseFloat(data[0].win_rate) || 0,
+      };
+    }
+  } catch (e) {}
+  return { maxRSI: 70, bestSymbol: null, winRate: 0 };
+}
+
+async function analyzeStock(symbol, apiKey, secretKey, maxRSI = 70) {
   const DATA_URL = 'https://data.alpaca.markets';
   const barsRes = await fetch(`${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&limit=100&start=2025-01-01`, {
     headers: {
@@ -34,9 +57,9 @@ async function analyzeStock(symbol, apiKey, secretKey) {
   let signal = 'HOLD';
   let score = 0;
 
-  if (ma10 > ma20 && rsi < 70) {
+  if (ma10 > ma20 && rsi < maxRSI) {
     signal = 'BUY';
-    score = (ma10 - ma20) / ma20 * 100 + (70 - rsi);
+    score = (ma10 - ma20) / ma20 * 100 + (maxRSI - rsi);
   } else if (ma10 < ma20 && rsi > 30) {
     signal = 'SELL';
     score = (ma20 - ma10) / ma20 * 100 + (rsi - 30);
@@ -45,16 +68,13 @@ async function analyzeStock(symbol, apiKey, secretKey) {
   return { symbol, currentPrice, signal, score, rsi: rsi.toFixed(2), ma10: ma10.toFixed(2), ma20: ma20.toFixed(2) };
 }
 
-async function logTrade(trade) {
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
-
-  await fetch(`${SUPABASE_URL}/rest/v1/trades`, {
+async function logTrade(trade, supabaseUrl, supabaseKey) {
+  await fetch(`${supabaseUrl}/rest/v1/trades`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'apikey': SUPABASE_SECRET_KEY,
-      'Authorization': `Bearer ${SUPABASE_SECRET_KEY}`,
+      'apikey': supabaseKey,
+      'Authorization': `Bearer ${supabaseKey}`,
       'Prefer': 'return=minimal'
     },
     body: JSON.stringify(trade)
@@ -64,19 +84,35 @@ async function logTrade(trade) {
 export default async function handler(req, res) {
   const API_KEY = process.env.ALPACA_API_KEY;
   const SECRET_KEY = process.env.ALPACA_SECRET_KEY;
+  const SUPABASE_URL = process.env.SUPABASE_URL;
+  const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
   const BASE_URL = 'https://paper-api.alpaca.markets';
 
   try {
+    // Get latest learnings to adjust strategy
+    const learnings = await getLearnings(SUPABASE_URL, SUPABASE_SECRET_KEY);
+    const maxRSI = learnings.maxRSI;
+
     const results = await Promise.all(
-      WATCHLIST.map(symbol => analyzeStock(symbol, API_KEY, SECRET_KEY))
+      WATCHLIST.map(symbol => analyzeStock(symbol, API_KEY, SECRET_KEY, maxRSI))
     );
 
     const signals = results.filter(r => r !== null);
-    const buySignals = signals.filter(r => r.signal === 'BUY').sort((a, b) => b.score - a.score);
+    let buySignals = signals.filter(r => r.signal === 'BUY').sort((a, b) => b.score - a.score);
+
+    // Boost best performing symbol from learnings
+    if (learnings.bestSymbol) {
+      buySignals = buySignals.sort((a, b) => {
+        if (a.symbol === learnings.bestSymbol) return -1;
+        if (b.symbol === learnings.bestSymbol) return 1;
+        return b.score - a.score;
+      });
+    }
+
     const bestBuy = buySignals[0];
 
     if (!bestBuy) {
-      return res.status(200).json({ message: 'No strong buy signals found', signals });
+      return res.status(200).json({ message: 'No strong buy signals found', signals, learnings });
     }
 
     const shares = Math.floor(MAX_TRADE / bestBuy.currentPrice);
@@ -102,7 +138,6 @@ export default async function handler(req, res) {
 
     const order = await orderRes.json();
 
-    // Log trade to Supabase
     await logTrade({
       symbol: bestBuy.symbol,
       action: 'BUY',
@@ -112,12 +147,13 @@ export default async function handler(req, res) {
       ma10: parseFloat(bestBuy.ma10),
       ma20: parseFloat(bestBuy.ma20),
       score: bestBuy.score,
-    });
+    }, SUPABASE_URL, SUPABASE_SECRET_KEY);
 
     res.status(200).json({
       message: `Placed BUY order for ${shares} shares of ${bestBuy.symbol}`,
       order,
       bestBuy,
+      learningsApplied: learnings,
       allSignals: signals,
     });
 
