@@ -5,7 +5,7 @@ const nextConfig = {
     ALPACA_API_KEY: process.env.ALPACA_API_KEY,
     ALPACA_SECRET_KEY: process.env.ALPACA_SECRET_KEY,
   },
-  output: 'standalone',
+  pageExtensions: ['page.js', 'page.jsx'],
 }
 
 module.exports = nextConfig
