@@ -9,15 +9,10 @@ const BASE_URL = 'https://paper-api.alpaca.markets';
 const DATA_URL = 'https://data.alpaca.markets';
 
 const WATCHLIST = [
-  // Tech
   'AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'TSLA', 'AMZN', 'AMD', 'INTC', 'CRM',
-  // Finance
   'JPM', 'BAC', 'GS', 'MS', 'V', 'MA', 'WFC', 'C', 'AXP', 'BLK',
-  // Healthcare
   'JNJ', 'PFE', 'UNH', 'ABBV', 'MRK', 'CVS', 'LLY', 'TMO', 'ABT', 'DHR',
-  // Energy
   'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'VLO', 'PSX', 'OXY', 'HAL',
-  // ETFs
   'SPY', 'QQQ', 'DIA', 'IWM', 'VTI'
 ];
 
@@ -173,14 +168,12 @@ async function refreshMinuteIndicators() {
 }
 
 function scheduleRefresh() {
-  // Refresh daily indicators every 30 minutes
   setInterval(async () => {
     console.log('🔄 Refreshing daily indicators...');
     await loadAllDailyIndicators();
     await loadExistingPositions();
   }, 30 * 60 * 1000);
 
-  // Refresh minute indicators every 2 minutes
   setInterval(async () => {
     await refreshMinuteIndicators();
   }, 2 * 60 * 1000);
@@ -199,11 +192,8 @@ async function analyzeAndTrade(symbol, currentPrice) {
   const minute = minuteIndicators[symbol];
   if (!daily) return;
 
-  // Daily trend direction
   const dailyBullish = daily.ma10 > daily.ma20;
   const dailyRSIOk = daily.rsi < 70 && daily.rsi > 30;
-
-  // Minute trend confirmation (if available)
   const minuteBullish = minute ? minute.ma10 > minute.ma20 : true;
   const minuteRSIOk = minute ? minute.rsi < 70 : true;
 
@@ -242,7 +232,6 @@ async function analyzeAndTrade(symbol, currentPrice) {
   if (isOnCooldown(symbol)) return;
   if (Object.keys(positions).length >= MAX_POSITIONS) return;
 
-  // Both daily AND minute must confirm the signal
   if (dailyBullish && dailyRSIOk && minuteBullish && minuteRSIOk) {
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
@@ -261,15 +250,16 @@ async function analyzeAndTrade(symbol, currentPrice) {
   }
 }
 
-async function startBot() {
+function startBot() {
   console.log('🤖 Trading bot starting with multi-timeframe analysis...');
 
-  await loadAllDailyIndicators();
-  await refreshMinuteIndicators();
-  await loadExistingPositions();
-  scheduleRefresh();
-
+  // Connect to WebSocket immediately
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
+
+  // Load indicators in background without blocking WebSocket
+  loadAllDailyIndicators().then(() => refreshMinuteIndicators());
+  loadExistingPositions();
+  scheduleRefresh();
 
   ws.on('open', () => {
     console.log('✅ Connected to Alpaca IEX WebSocket!');
