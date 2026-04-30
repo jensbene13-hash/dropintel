@@ -28,7 +28,8 @@ const STOP_LOSS_PCT = 0.005;
 const COOLDOWN_MS = 5 * 60 * 1000;
 
 let positions = {};
-let indicators = {};
+let dailyIndicators = {};
+let minuteIndicators = {};
 let cooldowns = {};
 let pingInterval = null;
 let isTrading = false;
@@ -94,7 +95,21 @@ async function placeOrder(symbol, qty, side) {
   return res.json();
 }
 
-async function loadHistoricalData(symbol) {
+function calculateIndicators(closes) {
+  if (closes.length < 20) return null;
+  const ma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
+  const ma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+  const changes = closes.slice(-15).map((c, i, arr) => i === 0 ? 0 : c - arr[i - 1]);
+  const gains = changes.map(c => c > 0 ? c : 0);
+  const losses = changes.map(c => c < 0 ? Math.abs(c) : 0);
+  const avgGain = gains.reduce((a, b) => a + b, 0) / 14;
+  const avgLoss = losses.reduce((a, b) => a + b, 0) / 14;
+  const rs = avgGain / (avgLoss || 1);
+  const rsi = 100 - (100 / (1 + rs));
+  return { ma10, ma20, rsi };
+}
+
+async function loadDailyIndicators(symbol) {
   try {
     const res = await fetch(
       `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&limit=100&start=2025-01-01`,
@@ -108,43 +123,67 @@ async function loadHistoricalData(symbol) {
     const data = await res.json();
     const bars = data.bars || [];
     if (bars.length < 20) return null;
-
     const closes = bars.map(b => b.c);
-    const ma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
-    const ma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-    const changes = closes.slice(-15).map((c, i, arr) => i === 0 ? 0 : c - arr[i - 1]);
-    const gains = changes.map(c => c > 0 ? c : 0);
-    const losses = changes.map(c => c < 0 ? Math.abs(c) : 0);
-    const avgGain = gains.reduce((a, b) => a + b, 0) / 14;
-    const avgLoss = losses.reduce((a, b) => a + b, 0) / 14;
-    const rs = avgGain / (avgLoss || 1);
-    const rsi = 100 - (100 / (1 + rs));
-
-    return { ma10, ma20, rsi };
+    return calculateIndicators(closes);
   } catch (e) {
-    console.error(`Failed to load data for ${symbol}:`, e.message);
     return null;
   }
 }
 
-async function loadAllIndicators() {
-  console.log('📊 Loading historical indicators for all stocks...');
-  for (const symbol of WATCHLIST) {
-    const data = await loadHistoricalData(symbol);
-    if (data) {
-      indicators[symbol] = data;
-      console.log(`✅ ${symbol} | RSI: ${data.rsi.toFixed(2)} | MA10: ${data.ma10.toFixed(2)} | MA20: ${data.ma20.toFixed(2)}`);
-    }
+async function loadMinuteIndicators(symbol) {
+  try {
+    const res = await fetch(
+      `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Min&limit=50`,
+      {
+        headers: {
+          'APCA-API-KEY-ID': API_KEY,
+          'APCA-API-SECRET-KEY': SECRET_KEY,
+        }
+      }
+    );
+    const data = await res.json();
+    const bars = data.bars || [];
+    if (bars.length < 20) return null;
+    const closes = bars.map(b => b.c);
+    return calculateIndicators(closes);
+  } catch (e) {
+    return null;
   }
-  console.log(`✅ All indicators loaded for ${Object.keys(indicators).length} stocks!`);
 }
 
-function scheduleIndicatorRefresh() {
+async function loadAllDailyIndicators() {
+  console.log('📊 Loading daily indicators for all stocks...');
+  for (const symbol of WATCHLIST) {
+    const data = await loadDailyIndicators(symbol);
+    if (data) {
+      dailyIndicators[symbol] = data;
+    }
+  }
+  console.log(`✅ Daily indicators loaded for ${Object.keys(dailyIndicators).length} stocks!`);
+}
+
+async function refreshMinuteIndicators() {
+  for (const symbol of WATCHLIST) {
+    const data = await loadMinuteIndicators(symbol);
+    if (data) {
+      minuteIndicators[symbol] = data;
+    }
+  }
+  console.log(`🔄 Minute indicators refreshed for ${Object.keys(minuteIndicators).length} stocks`);
+}
+
+function scheduleRefresh() {
+  // Refresh daily indicators every 30 minutes
   setInterval(async () => {
-    console.log('🔄 Refreshing indicators and positions...');
-    await loadAllIndicators();
+    console.log('🔄 Refreshing daily indicators...');
+    await loadAllDailyIndicators();
     await loadExistingPositions();
   }, 30 * 60 * 1000);
+
+  // Refresh minute indicators every 2 minutes
+  setInterval(async () => {
+    await refreshMinuteIndicators();
+  }, 2 * 60 * 1000);
 }
 
 function isOnCooldown(symbol) {
@@ -156,10 +195,17 @@ function isOnCooldown(symbol) {
 async function analyzeAndTrade(symbol, currentPrice) {
   if (isTrading) return;
 
-  const ind = indicators[symbol];
-  if (!ind) return;
+  const daily = dailyIndicators[symbol];
+  const minute = minuteIndicators[symbol];
+  if (!daily) return;
 
-  const { ma10, ma20, rsi } = ind;
+  // Daily trend direction
+  const dailyBullish = daily.ma10 > daily.ma20;
+  const dailyRSIOk = daily.rsi < 70 && daily.rsi > 30;
+
+  // Minute trend confirmation (if available)
+  const minuteBullish = minute ? minute.ma10 > minute.ma20 : true;
+  const minuteRSIOk = minute ? minute.rsi < 70 : true;
 
   if (positions[symbol]) {
     const position = positions[symbol];
@@ -176,7 +222,6 @@ async function analyzeAndTrade(symbol, currentPrice) {
       });
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
-      console.log(`⏳ ${symbol} on 5 min cooldown`);
       isTrading = false;
     } else if (pnlPct <= -STOP_LOSS_PCT) {
       isTrading = true;
@@ -189,40 +234,40 @@ async function analyzeAndTrade(symbol, currentPrice) {
       });
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
-      console.log(`⏳ ${symbol} on 5 min cooldown`);
       isTrading = false;
     }
     return;
   }
 
   if (isOnCooldown(symbol)) return;
-
   if (Object.keys(positions).length >= MAX_POSITIONS) return;
 
-  if (ma10 > ma20 && rsi < 70) {
+  // Both daily AND minute must confirm the signal
+  if (dailyBullish && dailyRSIOk && minuteBullish && minuteRSIOk) {
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
 
     isTrading = true;
-    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${rsi.toFixed(2)} | Positions: ${Object.keys(positions).length + 1}/${MAX_POSITIONS}`);
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | Daily RSI: ${daily.rsi.toFixed(2)} | Minute RSI: ${minute ? minute.rsi.toFixed(2) : 'N/A'} | Positions: ${Object.keys(positions).length + 1}/${MAX_POSITIONS}`);
     await placeOrder(symbol, shares, 'buy');
     positions[symbol] = { entryPrice: currentPrice, shares };
     await logTrade({
       symbol, action: 'BUY', price: currentPrice, shares,
-      rsi: parseFloat(rsi.toFixed(2)),
-      ma10: parseFloat(ma10.toFixed(2)),
-      ma20: parseFloat(ma20.toFixed(2)),
+      rsi: parseFloat(daily.rsi.toFixed(2)),
+      ma10: parseFloat(daily.ma10.toFixed(2)),
+      ma20: parseFloat(daily.ma20.toFixed(2)),
     });
     isTrading = false;
   }
 }
 
 async function startBot() {
-  console.log('🤖 Trading bot starting...');
+  console.log('🤖 Trading bot starting with multi-timeframe analysis...');
 
-  await loadAllIndicators();
+  await loadAllDailyIndicators();
+  await refreshMinuteIndicators();
   await loadExistingPositions();
-  scheduleIndicatorRefresh();
+  scheduleRefresh();
 
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
 
@@ -250,7 +295,7 @@ async function startBot() {
       }
 
       if (msg.T === 'subscription') {
-        console.log('✅ Subscribed! Bot is now trading live!');
+        console.log('✅ Subscribed! Bot is now trading live with multi-timeframe analysis!');
       }
 
       if (msg.T === 't') {
@@ -261,9 +306,7 @@ async function startBot() {
     }
   });
 
-  ws.on('pong', () => {
-    console.log('🏓 Connection alive');
-  });
+  ws.on('pong', () => {});
 
   ws.on('error', (err) => {
     console.error('❌ WebSocket error:', err.message);
