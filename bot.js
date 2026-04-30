@@ -28,6 +28,7 @@ let minuteIndicators = {};
 let cooldowns = {};
 let pingInterval = null;
 let isTrading = false;
+let isSubscribed = false;
 
 async function loadExistingPositions() {
   try {
@@ -150,9 +151,7 @@ async function loadAllDailyIndicators() {
   console.log('📊 Loading daily indicators for all stocks...');
   for (const symbol of WATCHLIST) {
     const data = await loadDailyIndicators(symbol);
-    if (data) {
-      dailyIndicators[symbol] = data;
-    }
+    if (data) dailyIndicators[symbol] = data;
   }
   console.log(`✅ Daily indicators loaded for ${Object.keys(dailyIndicators).length} stocks!`);
 }
@@ -160,16 +159,13 @@ async function loadAllDailyIndicators() {
 async function refreshMinuteIndicators() {
   for (const symbol of WATCHLIST) {
     const data = await loadMinuteIndicators(symbol);
-    if (data) {
-      minuteIndicators[symbol] = data;
-    }
+    if (data) minuteIndicators[symbol] = data;
   }
   console.log(`🔄 Minute indicators refreshed for ${Object.keys(minuteIndicators).length} stocks`);
 }
 
 function scheduleRefresh() {
   setInterval(async () => {
-    console.log('🔄 Refreshing daily indicators...');
     await loadAllDailyIndicators();
     await loadExistingPositions();
   }, 30 * 60 * 1000);
@@ -181,8 +177,7 @@ function scheduleRefresh() {
 
 function isOnCooldown(symbol) {
   if (!cooldowns[symbol]) return false;
-  const elapsed = Date.now() - cooldowns[symbol];
-  return elapsed < COOLDOWN_MS;
+  return Date.now() - cooldowns[symbol] < COOLDOWN_MS;
 }
 
 async function analyzeAndTrade(symbol, currentPrice) {
@@ -252,11 +247,10 @@ async function analyzeAndTrade(symbol, currentPrice) {
 
 function startBot() {
   console.log('🤖 Trading bot starting with multi-timeframe analysis...');
+  isSubscribed = false;
 
-  // Connect to WebSocket immediately
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
 
-  // Load indicators in background without blocking WebSocket
   loadAllDailyIndicators().then(() => refreshMinuteIndicators());
   loadExistingPositions();
   scheduleRefresh();
@@ -269,6 +263,14 @@ function startBot() {
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
+        // Resubscribe if not subscribed
+        if (!isSubscribed) {
+          console.log('🔄 Resubscribing...');
+          ws.send(JSON.stringify({
+            action: 'subscribe',
+            trades: WATCHLIST,
+          }));
+        }
       }
     }, 30000);
   });
@@ -276,6 +278,8 @@ function startBot() {
   ws.on('message', async (data) => {
     const messages = JSON.parse(data);
     for (const msg of messages) {
+      console.log('📨', JSON.stringify(msg).substring(0, 100));
+
       if (msg.T === 'success' && msg.msg === 'authenticated') {
         console.log('✅ Authenticated! Subscribing to live trades...');
         ws.send(JSON.stringify({
@@ -285,7 +289,12 @@ function startBot() {
       }
 
       if (msg.T === 'subscription') {
-        console.log('✅ Subscribed! Bot is now trading live with multi-timeframe analysis!');
+        isSubscribed = true;
+        console.log('✅ Subscribed! Bot is now trading live!');
+      }
+
+      if (msg.T === 'error') {
+        console.error('❌ Alpaca error:', JSON.stringify(msg));
       }
 
       if (msg.T === 't') {
@@ -305,6 +314,7 @@ function startBot() {
   ws.on('close', (code, reason) => {
     console.log(`Disconnected (${code}), reconnecting in 5 seconds...`);
     if (pingInterval) clearInterval(pingInterval);
+    isSubscribed = false;
     setTimeout(startBot, 5000);
   });
 }
