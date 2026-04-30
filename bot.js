@@ -22,6 +22,30 @@ let positions = {};
 let indicators = {};
 let pingInterval = null;
 
+async function loadExistingPositions() {
+  try {
+    const res = await fetch(`${BASE_URL}/v2/positions`, {
+      headers: {
+        'APCA-API-KEY-ID': API_KEY,
+        'APCA-API-SECRET-KEY': SECRET_KEY,
+      }
+    });
+    const existing = await res.json();
+    if (Array.isArray(existing)) {
+      for (const p of existing) {
+        positions[p.symbol] = {
+          entryPrice: parseFloat(p.avg_entry_price),
+          shares: parseFloat(p.qty)
+        };
+        console.log(`📋 Loaded existing position: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price}`);
+      }
+    }
+    console.log(`✅ Loaded ${Object.keys(positions).length} existing positions`);
+  } catch (e) {
+    console.error('Failed to load existing positions:', e.message);
+  }
+}
+
 async function logTrade(trade) {
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/trades`, {
@@ -103,7 +127,6 @@ async function loadAllIndicators() {
   console.log('✅ All indicators loaded! Bot is ready to trade.');
 }
 
-// Refresh indicators every 30 minutes
 function scheduleIndicatorRefresh() {
   setInterval(async () => {
     console.log('🔄 Refreshing indicators...');
@@ -162,8 +185,8 @@ async function analyzeAndTrade(symbol, currentPrice) {
 async function startBot() {
   console.log('🤖 Trading bot starting...');
 
-  // Load all indicators once before connecting
   await loadAllIndicators();
+  await loadExistingPositions();
   scheduleIndicatorRefresh();
 
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
