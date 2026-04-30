@@ -72,7 +72,6 @@ async function loadLearnings() {
       console.log('📊 No learnings yet — using default parameters');
     }
 
-    // Find symbols with 3+ recent losses to avoid
     const tradesRes = await fetch(
       `${SUPABASE_URL}/rest/v1/trades?outcome=eq.LOSS&order=created_at.desc&limit=30`,
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
@@ -110,24 +109,20 @@ async function runLearningAnalysis() {
     const losses = trades.filter(t => t.outcome === 'LOSS');
     const winRate = (wins.length / trades.length * 100).toFixed(2);
 
-    // 1. Best RSI range
     const winRSI = wins.map(t => parseFloat(t.rsi)).filter(Boolean);
     const avgWinRSI = winRSI.length > 0 ? winRSI.reduce((a, b) => a + b, 0) / winRSI.length : 65;
     const recommendedMaxRSI = Math.min(avgWinRSI + 5, 70);
 
-    // 2. Best performing symbols
     const symbolStats = {};
     trades.forEach(t => {
-      if (!symbolStats[t.symbol]) symbolStats[t.symbol] = { wins: 0, losses: 0, totalPL: 0 };
+      if (!symbolStats[t.symbol]) symbolStats[t.symbol] = { wins: 0, losses: 0 };
       if (t.outcome === 'WIN') symbolStats[t.symbol].wins++;
       else symbolStats[t.symbol].losses++;
-      symbolStats[t.symbol].totalPL += parseFloat(t.profit_loss || 0);
     });
     const bestSymbol = Object.entries(symbolStats)
       .filter(([_, s]) => s.wins + s.losses >= 2)
       .sort((a, b) => (b[1].wins / (b[1].wins + b[1].losses)) - (a[1].wins / (a[1].wins + a[1].losses)))[0]?.[0];
 
-    // 3. Best hours of day
     const hourStats = {};
     trades.forEach(t => {
       const hour = new Date(t.created_at).getUTCHours();
@@ -141,7 +136,6 @@ async function runLearningAnalysis() {
       .slice(0, 3)
       .map(([hour]) => parseInt(hour));
 
-    // 4. Best performing sectors
     const sectorStats = {};
     trades.forEach(t => {
       const sector = SECTOR_MAP[t.symbol] || 'unknown';
@@ -155,11 +149,9 @@ async function runLearningAnalysis() {
       .slice(0, 2)
       .map(([sector]) => sector);
 
-    // 5. Best MACD histogram range
     const winScores = wins.map(t => parseFloat(t.score || 0)).filter(Boolean);
     const avgWinScore = winScores.length > 0 ? winScores.reduce((a, b) => a + b, 0) / winScores.length : 0;
 
-    // Save learnings
     await fetch(`${SUPABASE_URL}/rest/v1/learnings`, {
       method: 'POST',
       headers: {
@@ -180,17 +172,12 @@ async function runLearningAnalysis() {
       })
     });
 
-    // Update bot params immediately
     botParams.maxRSI = recommendedMaxRSI;
     if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
     if (bestHours.length > 0) botParams.bestHours = bestHours;
     if (bestSectors.length > 0) botParams.bestSectors = bestSectors;
 
-    console.log(`✅ Learning complete!`);
-    console.log(`📊 Win rate: ${winRate}% | Trades: ${trades.length}`);
-    console.log(`📈 Best RSI max: ${recommendedMaxRSI.toFixed(2)} | Avg win RSI: ${avgWinRSI.toFixed(2)}`);
-    console.log(`⭐ Best symbol: ${bestSymbol} | Best hours: ${bestHours.join(',')} | Best sectors: ${bestSectors.join(',')}`);
-    console.log(`📉 Avg MACD histogram on wins: ${avgWinScore.toFixed(4)}`);
+    console.log(`✅ Learning complete! Win rate: ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best symbol: ${bestSymbol} | Best hours: ${bestHours.join(',')} | Best sectors: ${bestSectors.join(',')}`);
   } catch (e) {
     console.error('Learning analysis failed:', e.message);
   }
@@ -496,9 +483,8 @@ async function analyzeAndTrade(symbol, currentPrice) {
   const goodSector = isGoodSector(symbol);
 
   if (dailyBullish && strictDailyRSIOk && dailyMACDBullish && minuteBullish && minuteRSIOk && minuteMACDBullish && volumeOk) {
-    // Require good hour AND good sector once we have enough data
-    if (trades > 20 && !goodHour) return;
-    if (trades > 20 && !goodSector && !isPreferred) return;
+    if (botParams.bestHours.length > 0 && !goodHour) return;
+    if (botParams.bestSectors.length > 0 && !goodSector && !isPreferred) return;
 
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
