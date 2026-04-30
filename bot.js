@@ -5,6 +5,7 @@ const API_KEY = process.env.ALPACA_API_KEY;
 const SECRET_KEY = process.env.ALPACA_SECRET_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY;
+const NEWS_API_KEY = process.env.NEWS_API_KEY;
 const BASE_URL = 'https://paper-api.alpaca.markets';
 const DATA_URL = 'https://data.alpaca.markets';
 
@@ -14,6 +15,29 @@ const WATCHLIST = [
   'JNJ', 'PFE', 'UNH', 'LLY',
   'XOM', 'CVX', 'COP', 'EOG',
   'SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'XLF'
+];
+
+const STOCK_NAMES = {
+  'AAPL': 'Apple', 'NVDA': 'Nvidia', 'MSFT': 'Microsoft', 'META': 'Meta',
+  'GOOGL': 'Google', 'TSLA': 'Tesla', 'AMZN': 'Amazon', 'AMD': 'AMD',
+  'CRM': 'Salesforce', 'INTC': 'Intel', 'JPM': 'JPMorgan', 'BAC': 'Bank of America',
+  'GS': 'Goldman Sachs', 'V': 'Visa', 'MA': 'Mastercard', 'WFC': 'Wells Fargo',
+  'JNJ': 'Johnson Johnson', 'PFE': 'Pfizer', 'UNH': 'UnitedHealth', 'LLY': 'Eli Lilly',
+  'XOM': 'ExxonMobil', 'CVX': 'Chevron', 'COP': 'ConocoPhillips', 'EOG': 'EOG Resources',
+  'SPY': 'S&P 500', 'QQQ': 'Nasdaq', 'DIA': 'Dow Jones', 'IWM': 'Russell',
+  'VTI': 'Vanguard', 'XLF': 'Financial Select'
+};
+
+const NEGATIVE_KEYWORDS = [
+  'lawsuit', 'fraud', 'investigation', 'SEC', 'fine', 'penalty', 'hack', 'breach',
+  'recall', 'bankruptcy', 'layoff', 'miss', 'disappoints', 'warns', 'downgrade',
+  'crash', 'plunge', 'tumble', 'fall', 'drop', 'decline', 'loss', 'cut'
+];
+
+const POSITIVE_KEYWORDS = [
+  'beat', 'exceeds', 'record', 'surge', 'rally', 'upgrade', 'buy', 'outperform',
+  'growth', 'profit', 'revenue', 'strong', 'bullish', 'partnership', 'contract',
+  'innovation', 'launch', 'expansion', 'dividend', 'buyback'
 ];
 
 const MAX_POSITIONS_MARKET = 8;
@@ -31,6 +55,8 @@ let botParams = {
   bestHours: [],
   bestSectors: [],
 };
+
+let newsData = {};
 
 const SECTOR_MAP = {
   'AAPL': 'tech', 'NVDA': 'tech', 'MSFT': 'tech', 'META': 'tech', 'GOOGL': 'tech',
@@ -54,6 +80,57 @@ let pingInterval = null;
 let isTrading = false;
 let isSubscribed = false;
 
+async function fetchNewsForSymbol(symbol) {
+  try {
+    const name = STOCK_NAMES[symbol] || symbol;
+    const query = encodeURIComponent(`${name} stock`);
+    const from = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const url = `https://newsapi.org/v2/everything?q=${query}&from=${from}&sortBy=publishedAt&pageSize=5&apiKey=${NEWS_API_KEY}`;
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.articles || data.articles.length === 0) {
+      return { sentiment: 'neutral', score: 0, hasNews: false };
+    }
+
+    let positiveCount = 0;
+    let negativeCount = 0;
+
+    data.articles.forEach(article => {
+      const text = `${article.title} ${article.description || ''}`.toLowerCase();
+      POSITIVE_KEYWORDS.forEach(kw => { if (text.includes(kw)) positiveCount++; });
+      NEGATIVE_KEYWORDS.forEach(kw => { if (text.includes(kw)) negativeCount++; });
+    });
+
+    const score = positiveCount - negativeCount;
+    let sentiment = 'neutral';
+    if (score > 2) sentiment = 'positive';
+    else if (score < -1) sentiment = 'negative';
+
+    return { sentiment, score, hasNews: true, articleCount: data.articles.length };
+  } catch (e) {
+    return { sentiment: 'neutral', score: 0, hasNews: false };
+  }
+}
+
+async function refreshNewsData() {
+  console.log('📰 Refreshing news sentiment for all stocks...');
+  let positive = 0, negative = 0, neutral = 0;
+  for (const symbol of WATCHLIST) {
+    const news = await fetchNewsForSymbol(symbol);
+    newsData[symbol] = news;
+    if (news.sentiment === 'positive') positive++;
+    else if (news.sentiment === 'negative') negative++;
+    else neutral++;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  console.log(`📰 News: ${positive} positive, ${negative} negative, ${neutral} neutral`);
+}
+
+function getNewsSentiment(symbol) {
+  return newsData[symbol] || { sentiment: 'neutral', score: 0, hasNews: false };
+}
+
 function getMomentum(symbol) {
   const prices = realtimePrices[symbol];
   if (!prices || prices.length < 5) return 0;
@@ -61,7 +138,7 @@ function getMomentum(symbol) {
   return recent[recent.length - 1] - recent[0];
 }
 
-function getPositionSize(indicators, isPreferred) {
+function getPositionSize(indicators, isPreferred, newsSentiment) {
   let score = 0;
   if (indicators.rsi >= 40 && indicators.rsi <= 60) score += 3;
   else if (indicators.rsi >= 35 && indicators.rsi <= 65) score += 2;
@@ -74,8 +151,9 @@ function getPositionSize(indicators, isPreferred) {
   else if (maSeparation > 0.2) score += 2;
   else score += 1;
   if (isPreferred) score += 2;
-  if (score >= 11) return 300;
-  if (score >= 8) return 200;
+  if (newsSentiment === 'positive') score += 2;
+  if (score >= 13) return 300;
+  if (score >= 9) return 200;
   if (score >= 5) return 150;
   return 100;
 }
@@ -138,14 +216,12 @@ async function runLearningAnalysis() {
     );
     const trades = await tradesRes.json();
     if (!trades || trades.length < 3) return;
-
     const wins = trades.filter(t => t.outcome === 'WIN');
     const losses = trades.filter(t => t.outcome === 'LOSS');
     const winRate = (wins.length / trades.length * 100).toFixed(2);
     const winRSI = wins.map(t => parseFloat(t.rsi)).filter(Boolean);
     const avgWinRSI = winRSI.length > 0 ? winRSI.reduce((a, b) => a + b, 0) / winRSI.length : 65;
     const recommendedMaxRSI = Math.min(avgWinRSI + 5, 72);
-
     const symbolStats = {};
     trades.forEach(t => {
       if (!symbolStats[t.symbol]) symbolStats[t.symbol] = { wins: 0, losses: 0 };
@@ -155,7 +231,6 @@ async function runLearningAnalysis() {
     const bestSymbol = Object.entries(symbolStats)
       .filter(([_, s]) => s.wins + s.losses >= 2)
       .sort((a, b) => (b[1].wins / (b[1].wins + b[1].losses)) - (a[1].wins / (a[1].wins + a[1].losses)))[0]?.[0];
-
     const hourStats = {};
     trades.forEach(t => {
       const hour = new Date(t.created_at).getUTCHours();
@@ -168,7 +243,6 @@ async function runLearningAnalysis() {
       .sort((a, b) => (b[1].wins / (b[1].wins + b[1].losses)) - (a[1].wins / (a[1].wins + a[1].losses)))
       .slice(0, 3)
       .map(([hour]) => parseInt(hour));
-
     const sectorStats = {};
     trades.forEach(t => {
       const sector = SECTOR_MAP[t.symbol] || 'unknown';
@@ -181,7 +255,6 @@ async function runLearningAnalysis() {
       .sort((a, b) => (b[1].wins / (b[1].wins + b[1].losses)) - (a[1].wins / (a[1].wins + a[1].losses)))
       .slice(0, 2)
       .map(([sector]) => sector);
-
     await fetch(`${SUPABASE_URL}/rest/v1/learnings`, {
       method: 'POST',
       headers: {
@@ -201,12 +274,10 @@ async function runLearningAnalysis() {
         total_trades: trades.length,
       })
     });
-
     botParams.maxRSI = recommendedMaxRSI;
     if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
     if (bestHours.length > 0) botParams.bestHours = bestHours;
     if (bestSectors.length > 0) botParams.bestSectors = bestSectors;
-
     console.log(`✅ Learning: Win rate ${winRate}% | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol}`);
   } catch (e) {
     console.error('Learning failed:', e.message);
@@ -250,7 +321,7 @@ async function loadExistingPositions() {
             lowestPrice: parseFloat(p.current_price || p.avg_entry_price),
             trailingStop: parseFloat(p.avg_entry_price) * (1 + TRAILING_STOP_PCT),
           };
-          console.log(`📋 Loaded SHORT position: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price}`);
+          console.log(`📋 Loaded SHORT: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price}`);
         } else {
           positions[p.symbol] = {
             entryPrice: parseFloat(p.avg_entry_price),
@@ -258,7 +329,7 @@ async function loadExistingPositions() {
             highestPrice: parseFloat(p.current_price || p.avg_entry_price),
             trailingStop: parseFloat(p.avg_entry_price) * (1 - TRAILING_STOP_PCT),
           };
-          console.log(`📋 Loaded LONG position: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price}`);
+          console.log(`📋 Loaded LONG: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price}`);
         }
       }
     }
@@ -374,7 +445,7 @@ async function loadAllDailyIndicators() {
     const data = await loadDailyIndicators(symbol);
     if (data) dailyIndicators[symbol] = data;
   }
-  console.log(`✅ Indicators loaded and seeded for ${Object.keys(dailyIndicators).length} stocks!`);
+  console.log(`✅ Indicators loaded for ${Object.keys(dailyIndicators).length} stocks!`);
 }
 
 function scheduleRefresh() {
@@ -387,6 +458,11 @@ function scheduleRefresh() {
     await runLearningAnalysis();
     await loadLearnings();
   }, 60 * 60 * 1000);
+
+  // Refresh news every 30 minutes
+  setInterval(async () => {
+    await refreshNewsData();
+  }, 30 * 60 * 1000);
 
   setInterval(() => {
     const now = new Date();
@@ -425,20 +501,17 @@ function getBearishScore(indicators, daily) {
 async function manageShortPosition(symbol, currentPrice, session) {
   const position = shortPositions[symbol];
   if (!position) return;
-
   const pnlPct = (position.entryPrice - currentPrice) / position.entryPrice;
 
-  // Update trailing stop for shorts (moves DOWN as price falls)
   if (currentPrice < position.lowestPrice) {
     position.lowestPrice = currentPrice;
     position.trailingStop = currentPrice * (1 + TRAILING_STOP_PCT);
     console.log(`📊 SHORT ${symbol} new low $${currentPrice} | Trailing stop: $${position.trailingStop.toFixed(2)}`);
   }
 
-  // Cover short on trailing stop (price moved back up)
   if (currentPrice >= position.trailingStop && pnlPct > 0) {
     isTrading = true;
-    console.log(`🟢 SHORT COVER: Buying back ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%) [${session}]`);
+    console.log(`🟢 SHORT COVER: ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
     await placeOrder(symbol, position.shares, 'buy', session !== 'market');
     await logTrade({
       symbol, action: 'SHORT_COVER', price: currentPrice,
@@ -452,10 +525,9 @@ async function manageShortPosition(symbol, currentPrice, session) {
     return;
   }
 
-  // Stop loss on short (price went up too much)
   if (pnlPct <= -STOP_LOSS_PCT) {
     isTrading = true;
-    console.log(`🔴 SHORT STOP LOSS: Buying back ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%) [${session}]`);
+    console.log(`🔴 SHORT STOP LOSS: ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
     await placeOrder(symbol, position.shares, 'buy', session !== 'market');
     await logTrade({
       symbol, action: 'SHORT_COVER', price: currentPrice,
@@ -481,13 +553,16 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   const indicators = realtime || daily;
   if (!indicators) return;
 
-  // Manage existing short position
+  const news = getNewsSentiment(symbol);
+
+  // Skip if negative news
+  if (news.sentiment === 'negative') return;
+
   if (shortPositions[symbol]) {
     await manageShortPosition(symbol, currentPrice, session);
     return;
   }
 
-  // Manage existing long position
   if (positions[symbol]) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
@@ -500,7 +575,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
     if (currentPrice <= position.trailingStop && pnlPct > 0) {
       isTrading = true;
-      console.log(`🟢 TRAILING STOP: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%) [${session}]`);
+      console.log(`🟢 TRAILING STOP: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
       await placeOrder(symbol, position.shares, 'sell', session !== 'market');
       await logTrade({
         symbol, action: 'SELL', price: currentPrice,
@@ -516,7 +591,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
     if (pnlPct <= -STOP_LOSS_PCT) {
       isTrading = true;
-      console.log(`🔴 STOP LOSS: Selling ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%) [${session}]`);
+      console.log(`🔴 STOP LOSS: Selling ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
       await placeOrder(symbol, position.shares, 'sell', session !== 'market');
       await logTrade({
         symbol, action: 'SELL', price: currentPrice,
@@ -542,14 +617,15 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   const signalScore = getSignalScore(indicators, daily);
   const bearishScore = getBearishScore(indicators, daily);
   const isPreferred = botParams.preferredSymbols.includes(symbol);
-  const maxTrade = getPositionSize(indicators, isPreferred);
+  const maxTrade = getPositionSize(indicators, isPreferred, news.sentiment);
   const shares = Math.floor(maxTrade / currentPrice);
   if (shares < 1) return;
 
-  // LONG trade — price going up
+  // LONG — bullish signals + positive/neutral news + upward momentum
   if (signalScore >= 3 && momentum >= 0) {
     isTrading = true;
-    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Size: $${maxTrade} | Positions: ${totalPositions + 1}/${maxPositions}`);
+    const newsIcon = news.sentiment === 'positive' ? '📰✅' : '📰';
+    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | ${newsIcon} | Size: $${maxTrade} | Positions: ${totalPositions + 1}/${maxPositions}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -568,7 +644,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     return;
   }
 
-  // SHORT trade — price going down
+  // SHORT — bearish signals + downward momentum
   if (bearishScore >= 3 && momentum < 0) {
     isTrading = true;
     console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | Size: $${maxTrade} | Positions: ${totalPositions + 1}/${maxPositions}`);
@@ -591,7 +667,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Long + Short + Momentum + Self-Learning...');
+  console.log('🤖 Trading bot — Long + Short + News + Momentum + Self-Learning...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -599,7 +675,9 @@ function startBot() {
 
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
 
-  loadLearnings().then(() => loadAllDailyIndicators());
+  loadLearnings()
+    .then(() => loadAllDailyIndicators())
+    .then(() => refreshNewsData());
   loadExistingPositions();
   scheduleRefresh();
 
@@ -627,7 +705,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Long + Short bot is now live!');
+        console.log('✅ Subscribed! Long + Short + News bot is now live!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
