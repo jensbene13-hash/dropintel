@@ -19,6 +19,7 @@ const TAKE_PROFIT_PCT = 0.01;
 const STOP_LOSS_PCT = 0.005;
 
 let positions = {};
+let pingInterval = null;
 
 async function logTrade(trade) {
   try {
@@ -145,23 +146,39 @@ async function analyzeAndTrade(symbol, currentPrice) {
 function startBot() {
   console.log('🤖 Trading bot starting...');
   
-  const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
+  const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/sip');
 
   ws.on('open', () => {
     console.log('✅ Connected to Alpaca WebSocket!');
     ws.send(JSON.stringify({ action: 'auth', key: API_KEY, secret: SECRET_KEY }));
+    
+    // Keep connection alive
+    if (pingInterval) clearInterval(pingInterval);
+    pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+        console.log('🔄 Ping sent to keep connection alive');
+      }
+    }, 10000);
   });
 
   ws.on('message', async (data) => {
     const messages = JSON.parse(data);
     for (const msg of messages) {
+      console.log('📨 Message:', JSON.stringify(msg));
+      
       if (msg.T === 'success' && msg.msg === 'authenticated') {
-        console.log('✅ Authenticated! Subscribing to trades...');
+        console.log('✅ Authenticated! Subscribing to live trades...');
         ws.send(JSON.stringify({
           action: 'subscribe',
           trades: WATCHLIST,
         }));
       }
+
+      if (msg.T === 'subscription') {
+        console.log('✅ Subscribed to:', JSON.stringify(msg));
+      }
+
       if (msg.T === 't') {
         const symbol = msg.S;
         const price = msg.p;
@@ -171,12 +188,17 @@ function startBot() {
     }
   });
 
-  ws.on('error', (err) => {
-    console.error('WebSocket error:', err.message);
+  ws.on('pong', () => {
+    console.log('🏓 Pong received');
   });
 
-  ws.on('close', () => {
-    console.log('Disconnected, reconnecting in 5 seconds...');
+  ws.on('error', (err) => {
+    console.error('❌ WebSocket error:', err.message);
+  });
+
+  ws.on('close', (code, reason) => {
+    console.log(`Disconnected (${code}: ${reason}), reconnecting in 5 seconds...`);
+    if (pingInterval) clearInterval(pingInterval);
     setTimeout(startBot, 5000);
   });
 }
