@@ -16,12 +16,14 @@ const WATCHLIST = [
   'SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'XLF'
 ];
 
-const MAX_POSITIONS = 8;
+const MAX_POSITIONS_MARKET = 8;
+const MAX_POSITIONS_EXTENDED = 3;
 const MAX_TRADE = 200;
 const STOP_LOSS_PCT = 0.005;
 const TRAILING_STOP_PCT = 0.005;
 const COOLDOWN_MS = 5 * 60 * 1000;
 const VOLUME_MULTIPLIER = 1.2;
+const EXTENDED_VOLUME_MULTIPLIER = 2.0;
 
 let positions = {};
 let dailyIndicators = {};
@@ -31,6 +33,48 @@ let cooldowns = {};
 let pingInterval = null;
 let isTrading = false;
 let isSubscribed = false;
+
+function getMarketSession() {
+  const now = new Date();
+  const utcHour = now.getUTCHours();
+  const utcMinute = now.getUTCMinutes();
+  const utcTime = utcHour * 60 + utcMinute;
+  const day = now.getUTCDay();
+
+  // Weekend — no trading
+  if (day === 0 || day === 6) return 'closed';
+
+  // 9:30 AM - 4:00 PM EST = 14:30 - 21:00 UTC
+  if (utcTime >= 870 && utcTime < 1260) return 'market';
+
+  // 4:00 PM - 8:00 PM EST = 21:00 - 01:00 UTC
+  if (utcTime >= 1260 && utcTime < 1440) return 'after_hours';
+
+  // 4:00 AM - 9:30 AM EST = 09:00 - 14:30 UTC
+  if (utcTime >= 540 && utcTime < 870) return 'pre_market';
+
+  // Overnight — no new buys
+  return 'overnight';
+}
+
+function getMaxPositions() {
+  const session = getMarketSession();
+  if (session === 'market') return MAX_POSITIONS_MARKET;
+  if (session === 'pre_market' || session === 'after_hours') return MAX_POSITIONS_EXTENDED;
+  return 0;
+}
+
+function getVolumeMultiplier() {
+  const session = getMarketSession();
+  if (session === 'market') return VOLUME_MULTIPLIER;
+  return EXTENDED_VOLUME_MULTIPLIER;
+}
+
+function getTimeInForce() {
+  const session = getMarketSession();
+  if (session === 'market') return 'day';
+  return 'day';
+}
 
 async function loadExistingPositions() {
   try {
@@ -76,7 +120,7 @@ async function logTrade(trade) {
   }
 }
 
-async function placeOrder(symbol, qty, side) {
+async function placeOrder(symbol, qty, side, extendedHours = false) {
   const res = await fetch(`${BASE_URL}/v2/orders`, {
     method: 'POST',
     headers: {
@@ -88,8 +132,10 @@ async function placeOrder(symbol, qty, side) {
       symbol,
       qty,
       side,
-      type: 'market',
-      time_in_force: 'day',
+      type: extendedHours ? 'limit' : 'market',
+      time_in_force: extendedHours ? 'day' : 'day',
+      extended_hours: extendedHours,
+      ...(extendedHours && side === 'buy' ? { limit_price: null } : {}),
     })
   });
   return res.json();
@@ -127,9 +173,7 @@ async function loadDailyIndicators(symbol) {
     const volumes = bars.map(b => b.v);
     const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
     const indicators = calculateIndicators(closes);
-    if (indicators) {
-      volumeData[symbol] = { avgVolume };
-    }
+    if (indicators) volumeData[symbol] = { avgVolume };
     return indicators;
   } catch (e) {
     return null;
@@ -200,12 +244,13 @@ function isOnCooldown(symbol) {
 function hasVolumeConfirmation(symbol) {
   const vol = volumeData[symbol];
   if (!vol || !vol.avgVolume || !vol.currentVolume) return true;
-  return vol.currentVolume >= vol.avgVolume * VOLUME_MULTIPLIER;
+  return vol.currentVolume >= vol.avgVolume * getVolumeMultiplier();
 }
 
 async function analyzeAndTrade(symbol, currentPrice) {
   if (isTrading) return;
 
+  const session = getMarketSession();
   const daily = dailyIndicators[symbol];
   const minute = minuteIndicators[symbol];
   if (!daily) return;
@@ -215,22 +260,21 @@ async function analyzeAndTrade(symbol, currentPrice) {
   const minuteBullish = minute ? minute.ma10 > minute.ma20 : true;
   const minuteRSIOk = minute ? minute.rsi < 70 : true;
 
+  // Always manage existing positions regardless of session
   if (positions[symbol]) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
 
-    // Update trailing stop if price moved higher
     if (currentPrice > position.highestPrice) {
       position.highestPrice = currentPrice;
       position.trailingStop = currentPrice * (1 - TRAILING_STOP_PCT);
       console.log(`📊 ${symbol} new high $${currentPrice} | Trailing stop: $${position.trailingStop.toFixed(2)}`);
     }
 
-    // Check trailing stop
     if (currentPrice <= position.trailingStop && pnlPct > 0) {
       isTrading = true;
-      console.log(`🟢 TRAILING STOP: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
-      await placeOrder(symbol, position.shares, 'sell');
+      console.log(`🟢 TRAILING STOP: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%) [${session}]`);
+      await placeOrder(symbol, position.shares, 'sell', session !== 'market');
       await logTrade({
         symbol, action: 'SELL', price: currentPrice,
         shares: position.shares, outcome: 'WIN',
@@ -242,11 +286,10 @@ async function analyzeAndTrade(symbol, currentPrice) {
       return;
     }
 
-    // Hard stop loss
     if (pnlPct <= -STOP_LOSS_PCT) {
       isTrading = true;
-      console.log(`🔴 STOP LOSS: Selling ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
-      await placeOrder(symbol, position.shares, 'sell');
+      console.log(`🔴 STOP LOSS: Selling ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%) [${session}]`);
+      await placeOrder(symbol, position.shares, 'sell', session !== 'market');
       await logTrade({
         symbol, action: 'SELL', price: currentPrice,
         shares: position.shares, outcome: 'LOSS',
@@ -259,18 +302,26 @@ async function analyzeAndTrade(symbol, currentPrice) {
     return;
   }
 
+  // No new buys overnight or on weekends
+  const maxPositions = getMaxPositions();
+  if (maxPositions === 0) return;
+
   if (isOnCooldown(symbol)) return;
-  if (Object.keys(positions).length >= MAX_POSITIONS) return;
+  if (Object.keys(positions).length >= maxPositions) return;
 
   const volumeOk = hasVolumeConfirmation(symbol);
 
-  if (dailyBullish && dailyRSIOk && minuteBullish && minuteRSIOk && volumeOk) {
+  // Stricter RSI requirements for extended hours
+  const rsiLimit = session === 'market' ? 70 : 65;
+  const strictDailyRSIOk = daily.rsi < rsiLimit && daily.rsi > 30;
+
+  if (dailyBullish && strictDailyRSIOk && minuteBullish && minuteRSIOk && volumeOk) {
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
 
     isTrading = true;
-    console.log(`📈 BUY: ${symbol} at $${currentPrice} | Daily RSI: ${daily.rsi.toFixed(2)} | Minute RSI: ${minute ? minute.rsi.toFixed(2) : 'N/A'} | Volume: ✅ | Positions: ${Object.keys(positions).length + 1}/${MAX_POSITIONS}`);
-    await placeOrder(symbol, shares, 'buy');
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${daily.rsi.toFixed(2)} | Session: ${session} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
+    await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
       shares,
@@ -288,8 +339,11 @@ async function analyzeAndTrade(symbol, currentPrice) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot starting with volume confirmation + trailing stops...');
+  console.log('🤖 Trading bot starting — 24/7 with smart session management...');
   isSubscribed = false;
+
+  const session = getMarketSession();
+  console.log(`📅 Current session: ${session}`);
 
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
 
@@ -328,7 +382,7 @@ function startBot() {
 
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Bot is now trading live with volume + trailing stops!');
+        console.log('✅ Subscribed! Bot is now trading 24/7 with smart session management!');
       }
 
       if (msg.T === 'error') {
