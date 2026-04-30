@@ -20,8 +20,7 @@ const MAX_POSITIONS_MARKET = 8;
 const MAX_POSITIONS_EXTENDED = 3;
 const STOP_LOSS_PCT = 0.004;
 const TRAILING_STOP_PCT = 0.004;
-const COOLDOWN_MS = 2 * 60 * 1000; // Reduced to 2 minutes
-const VOLUME_MULTIPLIER = 1.0; // Removed volume requirement
+const COOLDOWN_MS = 2 * 60 * 1000;
 const MAX_PRICE_HISTORY = 100;
 
 let botParams = {
@@ -54,24 +53,26 @@ let pingInterval = null;
 let isTrading = false;
 let isSubscribed = false;
 
+function getMomentum(symbol) {
+  const prices = realtimePrices[symbol];
+  if (!prices || prices.length < 5) return 0;
+  const recent = prices.slice(-5);
+  return recent[recent.length - 1] - recent[0];
+}
+
 function getPositionSize(indicators, isPreferred) {
   let score = 0;
-
   if (indicators.rsi >= 40 && indicators.rsi <= 60) score += 3;
   else if (indicators.rsi >= 35 && indicators.rsi <= 65) score += 2;
   else score += 1;
-
   if (indicators.macd?.histogram > 0.1) score += 3;
   else if (indicators.macd?.histogram > 0.05) score += 2;
   else if (indicators.macd?.histogram > 0) score += 1;
-
   const maSeparation = indicators.ma10 > 0 ? (indicators.ma10 - indicators.ma20) / indicators.ma20 * 100 : 0;
   if (maSeparation > 0.5) score += 3;
   else if (maSeparation > 0.2) score += 2;
   else score += 1;
-
   if (isPreferred) score += 2;
-
   if (score >= 11) return 300;
   if (score >= 8) return 200;
   if (score >= 5) return 150;
@@ -81,13 +82,10 @@ function getPositionSize(indicators, isPreferred) {
 function updateRealtimeData(symbol, price, size) {
   if (!realtimePrices[symbol]) realtimePrices[symbol] = [];
   if (!realtimeVolumes[symbol]) realtimeVolumes[symbol] = [];
-
   realtimePrices[symbol].push(price);
   realtimeVolumes[symbol].push(size || 0);
-
   if (realtimePrices[symbol].length > MAX_PRICE_HISTORY) realtimePrices[symbol].shift();
   if (realtimeVolumes[symbol].length > MAX_PRICE_HISTORY) realtimeVolumes[symbol].shift();
-
   if (realtimePrices[symbol].length >= 26) {
     realtimeIndicators[symbol] = calculateIndicators(realtimePrices[symbol]);
   }
@@ -111,7 +109,6 @@ async function loadLearnings() {
     } else {
       console.log('📊 No learnings yet — using default parameters');
     }
-
     const tradesRes = await fetch(
       `${SUPABASE_URL}/rest/v1/trades?outcome=eq.LOSS&order=created_at.desc&limit=30`,
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
@@ -351,7 +348,6 @@ async function loadDailyIndicators(symbol) {
     const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
     const indicators = calculateIndicators(closes);
     if (indicators) volumeData[symbol] = { avgVolume };
-
     if (!realtimePrices[symbol] || realtimePrices[symbol].length < 26) {
       realtimePrices[symbol] = closes.slice(-MAX_PRICE_HISTORY);
       realtimeIndicators[symbol] = indicators;
@@ -397,20 +393,11 @@ function isOnCooldown(symbol) {
 
 function getSignalScore(indicators, daily) {
   let score = 0;
-
-  // MA trend — both timeframes
   if (indicators.ma10 > indicators.ma20) score++;
   if (daily && daily.ma10 > daily.ma20) score++;
-
-  // RSI in good range
   if (indicators.rsi > botParams.minRSI && indicators.rsi < botParams.maxRSI) score++;
-
-  // MACD bullish
   if (indicators.macd?.bullish) score++;
-
-  // Daily MACD bullish
   if (daily?.macd?.bullish) score++;
-
   return score;
 }
 
@@ -474,7 +461,10 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (isOnCooldown(symbol)) return;
   if (Object.keys(positions).length >= maxPositions) return;
 
-  // Require 3 out of 5 signals instead of all
+  // Check momentum — only skip if actively falling
+  const momentum = getMomentum(symbol);
+  if (momentum < 0) return;
+
   const signalScore = getSignalScore(indicators, daily);
   if (signalScore < 3) return;
 
@@ -485,7 +475,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
   isTrading = true;
   const source = realtime ? '⚡' : '📊';
-  console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Size: $${maxTrade} | ${source} | ${isPreferred ? '⭐' : ''} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
+  console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Momentum: ${momentum > 0 ? '📈' : '➡️'} | Size: $${maxTrade} | ${source} | ${isPreferred ? '⭐' : ''} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
   await placeOrder(symbol, shares, 'buy', session !== 'market');
   positions[symbol] = {
     entryPrice: currentPrice,
@@ -504,7 +494,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — High Frequency + Position Sizing + Self-Learning...');
+  console.log('🤖 Trading bot — Momentum + High Frequency + Self-Learning...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -540,7 +530,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! High frequency self-learning bot is now live!');
+        console.log('✅ Subscribed! Momentum + High Frequency bot is now live!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
