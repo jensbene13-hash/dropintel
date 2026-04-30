@@ -57,6 +57,7 @@ let botParams = {
 };
 
 let newsData = {};
+let currentRegime = 'neutral';
 
 const SECTOR_MAP = {
   'AAPL': 'tech', 'NVDA': 'tech', 'MSFT': 'tech', 'META': 'tech', 'GOOGL': 'tech',
@@ -80,6 +81,44 @@ let pingInterval = null;
 let isTrading = false;
 let isSubscribed = false;
 
+function getMarketRegime() {
+  const spy = realtimeIndicators['SPY'] || dailyIndicators['SPY'];
+  const qqq = realtimeIndicators['QQQ'] || dailyIndicators['QQQ'];
+  if (!spy) return 'neutral';
+
+  const spyMomentum = getMomentum('SPY');
+  const qqqMomentum = getMomentum('QQQ');
+
+  const bullSignals = [
+    spy.ma10 > spy.ma20,
+    qqq ? qqq.ma10 > qqq.ma20 : false,
+    spyMomentum > 0,
+    qqqMomentum > 0,
+    spy.rsi > 45 && spy.rsi < 75,
+  ].filter(Boolean).length;
+
+  const bearSignals = [
+    spy.ma10 < spy.ma20,
+    qqq ? qqq.ma10 < qqq.ma20 : false,
+    spyMomentum < 0,
+    qqqMomentum < 0,
+    spy.rsi < 45,
+  ].filter(Boolean).length;
+
+  if (bullSignals >= 3) return 'bull';
+  if (bearSignals >= 3) return 'bear';
+  return 'neutral';
+}
+
+function updateRegime() {
+  const newRegime = getMarketRegime();
+  if (newRegime !== currentRegime) {
+    console.log(`🌍 Market regime changed: ${currentRegime} → ${newRegime}`);
+    currentRegime = newRegime;
+  }
+  return currentRegime;
+}
+
 async function fetchNewsForSymbol(symbol) {
   try {
     const name = STOCK_NAMES[symbol] || symbol;
@@ -88,25 +127,20 @@ async function fetchNewsForSymbol(symbol) {
     const url = `https://newsapi.org/v2/everything?q=${query}&from=${from}&sortBy=publishedAt&pageSize=5&apiKey=${NEWS_API_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
-
     if (!data.articles || data.articles.length === 0) {
       return { sentiment: 'neutral', score: 0, hasNews: false };
     }
-
     let positiveCount = 0;
     let negativeCount = 0;
-
     data.articles.forEach(article => {
       const text = `${article.title} ${article.description || ''}`.toLowerCase();
       POSITIVE_KEYWORDS.forEach(kw => { if (text.includes(kw)) positiveCount++; });
       NEGATIVE_KEYWORDS.forEach(kw => { if (text.includes(kw)) negativeCount++; });
     });
-
     const score = positiveCount - negativeCount;
     let sentiment = 'neutral';
     if (score > 2) sentiment = 'positive';
     else if (score < -1) sentiment = 'negative';
-
     return { sentiment, score, hasNews: true, articleCount: data.articles.length };
   } catch (e) {
     return { sentiment: 'neutral', score: 0, hasNews: false };
@@ -114,7 +148,7 @@ async function fetchNewsForSymbol(symbol) {
 }
 
 async function refreshNewsData() {
-  console.log('📰 Refreshing news sentiment for all stocks...');
+  console.log('📰 Refreshing news sentiment...');
   let positive = 0, negative = 0, neutral = 0;
   for (const symbol of WATCHLIST) {
     const news = await fetchNewsForSymbol(symbol);
@@ -152,6 +186,8 @@ function getPositionSize(indicators, isPreferred, newsSentiment) {
   else score += 1;
   if (isPreferred) score += 2;
   if (newsSentiment === 'positive') score += 2;
+  // Boost size in strong regime
+  if (currentRegime === 'bull') score += 1;
   if (score >= 13) return 300;
   if (score >= 9) return 200;
   if (score >= 5) return 150;
@@ -446,6 +482,9 @@ async function loadAllDailyIndicators() {
     if (data) dailyIndicators[symbol] = data;
   }
   console.log(`✅ Indicators loaded for ${Object.keys(dailyIndicators).length} stocks!`);
+  // Update regime after loading indicators
+  currentRegime = getMarketRegime();
+  console.log(`🌍 Market regime: ${currentRegime}`);
 }
 
 function scheduleRefresh() {
@@ -459,7 +498,6 @@ function scheduleRefresh() {
     await loadLearnings();
   }, 60 * 60 * 1000);
 
-  // Refresh news every 30 minutes
   setInterval(async () => {
     await refreshNewsData();
   }, 30 * 60 * 1000);
@@ -547,6 +585,11 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
   updateRealtimeData(symbol, currentPrice, tradeSize);
 
+  // Update regime on every SPY tick
+  if (symbol === 'SPY' || symbol === 'QQQ') {
+    updateRegime();
+  }
+
   const session = getMarketSession();
   const realtime = realtimeIndicators[symbol];
   const daily = dailyIndicators[symbol];
@@ -554,8 +597,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (!indicators) return;
 
   const news = getNewsSentiment(symbol);
-
-  // Skip if negative news
   if (news.sentiment === 'negative') return;
 
   if (shortPositions[symbol]) {
@@ -611,7 +652,10 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (isOnCooldown(symbol)) return;
 
   const totalPositions = Object.keys(positions).length + Object.keys(shortPositions).length;
-  if (totalPositions >= maxPositions) return;
+
+  // Reduce positions in neutral market
+  const adjustedMax = currentRegime === 'neutral' ? Math.floor(maxPositions * 0.6) : maxPositions;
+  if (totalPositions >= adjustedMax) return;
 
   const momentum = getMomentum(symbol);
   const signalScore = getSignalScore(indicators, daily);
@@ -621,11 +665,12 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   const shares = Math.floor(maxTrade / currentPrice);
   if (shares < 1) return;
 
-  // LONG — bullish signals + positive/neutral news + upward momentum
-  if (signalScore >= 3 && momentum >= 0) {
+  // LONG — only in bull or neutral, not in bear market
+  if (currentRegime !== 'bear' && signalScore >= 3 && momentum >= 0) {
     isTrading = true;
-    const newsIcon = news.sentiment === 'positive' ? '📰✅' : '📰';
-    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | ${newsIcon} | Size: $${maxTrade} | Positions: ${totalPositions + 1}/${maxPositions}`);
+    const regimeIcon = currentRegime === 'bull' ? '🐂' : '➡️';
+    const newsIcon = news.sentiment === 'positive' ? '📰✅' : '';
+    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | ${regimeIcon} ${currentRegime} | ${newsIcon} | Size: $${maxTrade} | Positions: ${totalPositions + 1}/${adjustedMax}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -644,10 +689,11 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     return;
   }
 
-  // SHORT — bearish signals + downward momentum
-  if (bearishScore >= 3 && momentum < 0) {
+  // SHORT — only in bear or neutral, not in bull market
+  if (currentRegime !== 'bull' && bearishScore >= 3 && momentum < 0) {
     isTrading = true;
-    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | Size: $${maxTrade} | Positions: ${totalPositions + 1}/${maxPositions}`);
+    const regimeIcon = currentRegime === 'bear' ? '🐻' : '➡️';
+    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | ${regimeIcon} ${currentRegime} | Size: $${maxTrade} | Positions: ${totalPositions + 1}/${adjustedMax}`);
     await placeOrder(symbol, shares, 'sell', session !== 'market');
     shortPositions[symbol] = {
       entryPrice: currentPrice,
@@ -667,7 +713,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Long + Short + News + Momentum + Self-Learning...');
+  console.log('🤖 Trading bot — Market Regime + Long/Short + News + Self-Learning...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -705,7 +751,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Long + Short + News bot is now live!');
+        console.log('✅ Subscribed! Market Regime bot is now live!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
