@@ -4,7 +4,6 @@ const WATCHLIST = [
   'BAC', 'XOM', 'CVX', 'SPY', 'QQQ'
 ];
 
-const MIN_TRADE = 10;
 const MAX_TRADE = 200;
 
 async function getLearnings(supabaseUrl, supabaseKey) {
@@ -89,16 +88,31 @@ export default async function handler(req, res) {
   const BASE_URL = 'https://paper-api.alpaca.markets';
 
   try {
-    // Get latest learnings to adjust strategy
+    // Get learnings
     const learnings = await getLearnings(SUPABASE_URL, SUPABASE_SECRET_KEY);
     const maxRSI = learnings.maxRSI;
 
+    // Get current positions to avoid duplicate buys
+    const positionsRes = await fetch(`${BASE_URL}/v2/positions`, {
+      headers: {
+        'APCA-API-KEY-ID': API_KEY,
+        'APCA-API-SECRET-KEY': SECRET_KEY,
+      }
+    });
+    const positions = await positionsRes.json();
+    const ownedSymbols = Array.isArray(positions) ? positions.map(p => p.symbol) : [];
+
+    // Scan all stocks
     const results = await Promise.all(
       WATCHLIST.map(symbol => analyzeStock(symbol, API_KEY, SECRET_KEY, maxRSI))
     );
 
     const signals = results.filter(r => r !== null);
-    let buySignals = signals.filter(r => r.signal === 'BUY').sort((a, b) => b.score - a.score);
+
+    // Filter out stocks we already own
+    let buySignals = signals
+      .filter(r => r.signal === 'BUY' && !ownedSymbols.includes(r.symbol))
+      .sort((a, b) => b.score - a.score);
 
     // Boost best performing symbol from learnings
     if (learnings.bestSymbol) {
@@ -112,7 +126,11 @@ export default async function handler(req, res) {
     const bestBuy = buySignals[0];
 
     if (!bestBuy) {
-      return res.status(200).json({ message: 'No strong buy signals found', signals, learnings });
+      return res.status(200).json({ 
+        message: 'No strong buy signals found or all signals already owned', 
+        ownedSymbols,
+        signals 
+      });
     }
 
     const shares = Math.floor(MAX_TRADE / bestBuy.currentPrice);
@@ -154,6 +172,7 @@ export default async function handler(req, res) {
       order,
       bestBuy,
       learningsApplied: learnings,
+      ownedSymbols,
       allSignals: signals,
     });
 
