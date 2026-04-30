@@ -18,7 +18,6 @@ const WATCHLIST = [
 
 const MAX_POSITIONS_MARKET = 8;
 const MAX_POSITIONS_EXTENDED = 3;
-const MAX_TRADE = 200;
 const STOP_LOSS_PCT = 0.005;
 const TRAILING_STOP_PCT = 0.005;
 const COOLDOWN_MS = 5 * 60 * 1000;
@@ -47,16 +46,47 @@ const SECTOR_MAP = {
 
 let positions = {};
 let dailyIndicators = {};
-let realtimePrices = {}; // Real-time price history from WebSocket
-let realtimeVolumes = {}; // Real-time volume history
-let realtimeIndicators = {}; // Calculated from live ticks
+let realtimePrices = {};
+let realtimeVolumes = {};
+let realtimeIndicators = {};
 let volumeData = {};
 let cooldowns = {};
 let pingInterval = null;
 let isTrading = false;
 let isSubscribed = false;
 
-// Update real-time price history on every tick
+function getPositionSize(indicators, volumeOk, isPreferred) {
+  let score = 0;
+
+  // RSI sweet spot
+  if (indicators.rsi >= 40 && indicators.rsi <= 60) score += 3;
+  else if (indicators.rsi >= 35 && indicators.rsi <= 65) score += 2;
+  else score += 1;
+
+  // MACD strength
+  if (indicators.macd?.histogram > 0.1) score += 3;
+  else if (indicators.macd?.histogram > 0.05) score += 2;
+  else if (indicators.macd?.histogram > 0) score += 1;
+
+  // MA separation strength
+  const maSeparation = (indicators.ma10 - indicators.ma20) / indicators.ma20 * 100;
+  if (maSeparation > 0.5) score += 3;
+  else if (maSeparation > 0.2) score += 2;
+  else score += 1;
+
+  // Preferred symbol bonus
+  if (isPreferred) score += 2;
+
+  // Volume bonus
+  if (volumeOk) score += 2;
+
+  // Map score to position size
+  if (score >= 11) return 300;
+  if (score >= 8) return 200;
+  if (score >= 5) return 150;
+  return 100;
+}
+
 function updateRealtimeData(symbol, price, size) {
   if (!realtimePrices[symbol]) realtimePrices[symbol] = [];
   if (!realtimeVolumes[symbol]) realtimeVolumes[symbol] = [];
@@ -64,19 +94,11 @@ function updateRealtimeData(symbol, price, size) {
   realtimePrices[symbol].push(price);
   realtimeVolumes[symbol].push(size || 0);
 
-  // Keep only last 100 prices
-  if (realtimePrices[symbol].length > MAX_PRICE_HISTORY) {
-    realtimePrices[symbol].shift();
-  }
-  if (realtimeVolumes[symbol].length > MAX_PRICE_HISTORY) {
-    realtimeVolumes[symbol].shift();
-  }
+  if (realtimePrices[symbol].length > MAX_PRICE_HISTORY) realtimePrices[symbol].shift();
+  if (realtimeVolumes[symbol].length > MAX_PRICE_HISTORY) realtimeVolumes[symbol].shift();
 
-  // Recalculate indicators if we have enough data
   if (realtimePrices[symbol].length >= 26) {
     realtimeIndicators[symbol] = calculateIndicators(realtimePrices[symbol]);
-
-    // Update current volume vs average
     const avgVol = realtimeVolumes[symbol].slice(0, -5).reduce((a, b) => a + b, 0) / Math.max(realtimeVolumes[symbol].length - 5, 1);
     const currentVol = realtimeVolumes[symbol].slice(-5).reduce((a, b) => a + b, 0) / 5;
     if (!volumeData[symbol]) volumeData[symbol] = {};
@@ -99,7 +121,7 @@ async function loadLearnings() {
       if (learning.best_symbol) botParams.preferredSymbols = [learning.best_symbol];
       if (learning.best_hours) botParams.bestHours = JSON.parse(learning.best_hours || '[]');
       if (learning.best_sectors) botParams.bestSectors = JSON.parse(learning.best_sectors || '[]');
-      console.log(`📊 Learnings loaded! Win rate: ${learning.win_rate}% | maxRSI: ${botParams.maxRSI} | Best symbol: ${learning.best_symbol}`);
+      console.log(`📊 Learnings loaded! Win rate: ${learning.win_rate}% | maxRSI: ${botParams.maxRSI} | Best: ${learning.best_symbol}`);
     } else {
       console.log('📊 No learnings yet — using default parameters');
     }
@@ -348,13 +370,11 @@ async function loadDailyIndicators(symbol) {
     const indicators = calculateIndicators(closes);
     if (indicators) volumeData[symbol] = { avgVolume };
 
-    // Seed real-time price history with daily closes
     if (!realtimePrices[symbol] || realtimePrices[symbol].length < 26) {
       realtimePrices[symbol] = closes.slice(-MAX_PRICE_HISTORY);
       realtimeIndicators[symbol] = indicators;
       console.log(`🌱 Seeded real-time data for ${symbol}`);
     }
-
     return indicators;
   } catch (e) { return null; }
 }
@@ -369,19 +389,16 @@ async function loadAllDailyIndicators() {
 }
 
 function scheduleRefresh() {
-  // Refresh daily indicators every 30 minutes
   setInterval(async () => {
     await loadAllDailyIndicators();
     await loadExistingPositions();
   }, 30 * 60 * 1000);
 
-  // Run learning every hour
   setInterval(async () => {
     await runLearningAnalysis();
     await loadLearnings();
   }, 60 * 60 * 1000);
 
-  // Market close learning
   setInterval(() => {
     const now = new Date();
     if (now.getUTCHours() === 21 && now.getUTCMinutes() === 0) {
@@ -397,15 +414,11 @@ function isOnCooldown(symbol) {
 }
 
 function hasVolumeConfirmation(symbol) {
-  // Use real-time volume if available
   const vol = volumeData[symbol];
   if (!vol) return true;
-
-  // Prefer real-time volume data
   if (vol.realtimeAvgVolume && vol.realtimeCurrentVolume) {
     return vol.realtimeCurrentVolume >= vol.realtimeAvgVolume * getVolumeMultiplier();
   }
-
   if (!vol.avgVolume || !vol.currentVolume) return true;
   return vol.currentVolume >= vol.avgVolume * getVolumeMultiplier();
 }
@@ -424,12 +437,9 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (isTrading) return;
   if (botParams.avoidSymbols.includes(symbol)) return;
 
-  // Update real-time data
   updateRealtimeData(symbol, currentPrice, tradeSize);
 
   const session = getMarketSession();
-
-  // Use real-time indicators if available, fall back to daily
   const realtime = realtimeIndicators[symbol];
   const daily = dailyIndicators[symbol];
   const indicators = realtime || daily;
@@ -438,8 +448,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   const bullish = indicators.ma10 > indicators.ma20;
   const rsiOk = indicators.rsi < botParams.maxRSI && indicators.rsi > botParams.minRSI;
   const macdBullish = indicators.macd ? indicators.macd.bullish : true;
-
-  // Also check daily trend for confirmation
   const dailyTrendUp = daily ? daily.ma10 > daily.ma20 : true;
 
   if (positions[symbol]) {
@@ -501,12 +509,13 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     if (botParams.bestHours.length > 0 && !goodHour) return;
     if (botParams.bestSectors.length > 0 && !goodSector && !isPreferred) return;
 
-    const shares = Math.floor(MAX_TRADE / currentPrice);
+    const maxTrade = getPositionSize(indicators, volumeOk, isPreferred);
+    const shares = Math.floor(maxTrade / currentPrice);
     if (shares < 1) return;
 
     isTrading = true;
-    const source = realtime ? '⚡ REALTIME' : '📊 DAILY';
-    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | MACD: ${indicators.macd?.histogram.toFixed(4)} | ${source} | ${isPreferred ? '⭐' : ''} | ${goodSector ? '🏭' : ''} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
+    const source = realtime ? '⚡' : '📊';
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | MACD: ${indicators.macd?.histogram.toFixed(4)} | Size: $${maxTrade} | ${source} | ${isPreferred ? '⭐' : ''} | ${goodSector ? '🏭' : ''} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -526,7 +535,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Real-time indicators + Multi-dimensional learning...');
+  console.log('🤖 Trading bot — Real-time + Position Sizing + Multi-dimensional Learning...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -562,7 +571,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Real-time self-learning bot is now live!');
+        console.log('✅ Subscribed! Real-time + Position Sizing bot is now live!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
