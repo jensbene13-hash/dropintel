@@ -9,11 +9,16 @@ const BASE_URL = 'https://paper-api.alpaca.markets';
 const DATA_URL = 'https://data.alpaca.markets';
 
 const WATCHLIST = [
-  'AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'TSLA', 'AMZN', 'AMD', 'INTC', 'CRM',
-  'JPM', 'BAC', 'GS', 'MS', 'V', 'MA', 'WFC', 'C', 'AXP', 'BLK',
-  'JNJ', 'PFE', 'UNH', 'ABBV', 'MRK', 'CVS', 'LLY', 'TMO', 'ABT', 'DHR',
-  'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'VLO', 'PSX', 'OXY', 'HAL',
-  'SPY', 'QQQ', 'DIA', 'IWM', 'VTI'
+  // Tech (10)
+  'AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'TSLA', 'AMZN', 'AMD', 'CRM', 'INTC',
+  // Finance (6)
+  'JPM', 'BAC', 'GS', 'V', 'MA', 'WFC',
+  // Healthcare (4)
+  'JNJ', 'PFE', 'UNH', 'LLY',
+  // Energy (4)
+  'XOM', 'CVX', 'COP', 'EOG',
+  // ETFs (6)
+  'SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'XLF'
 ];
 
 const MAX_POSITIONS = 8;
@@ -263,7 +268,6 @@ function startBot() {
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
-        // Resubscribe if not subscribed
         if (!isSubscribed) {
           console.log('🔄 Resubscribing...');
           ws.send(JSON.stringify({
@@ -278,8 +282,6 @@ function startBot() {
   ws.on('message', async (data) => {
     const messages = JSON.parse(data);
     for (const msg of messages) {
-      console.log('📨', JSON.stringify(msg).substring(0, 100));
-
       if (msg.T === 'success' && msg.msg === 'authenticated') {
         console.log('✅ Authenticated! Subscribing to live trades...');
         ws.send(JSON.stringify({
