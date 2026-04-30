@@ -25,6 +25,15 @@ const COOLDOWN_MS = 5 * 60 * 1000;
 const VOLUME_MULTIPLIER = 1.2;
 const EXTENDED_VOLUME_MULTIPLIER = 2.0;
 
+// Default parameters — will be overridden by learnings
+let botParams = {
+  maxRSI: 70,
+  minRSI: 30,
+  minMACDHistogram: 0,
+  avoidSymbols: [],
+  preferredSymbols: [],
+};
+
 let positions = {};
 let dailyIndicators = {};
 let minuteIndicators = {};
@@ -33,6 +42,127 @@ let cooldowns = {};
 let pingInterval = null;
 let isTrading = false;
 let isSubscribed = false;
+
+async function loadLearnings() {
+  try {
+    console.log('🧠 Loading learnings from Supabase...');
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/learnings?order=created_at.desc&limit=1`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+    const data = await res.json();
+    if (data && data.length > 0) {
+      const learning = data[0];
+      botParams.maxRSI = parseFloat(learning.recommended_max_rsi) || 70;
+      console.log(`📊 Win rate: ${learning.win_rate}% | Best RSI max: ${botParams.maxRSI} | Best symbol: ${learning.best_symbol}`);
+      if (learning.best_symbol) {
+        botParams.preferredSymbols = [learning.best_symbol];
+      }
+      console.log(`⚙️ Self-adjusted parameters: maxRSI=${botParams.maxRSI}`);
+    } else {
+      console.log('📊 No learnings yet — using default parameters');
+    }
+
+    // Also analyze recent trades to find losing symbols
+    const tradesRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/trades?outcome=eq.LOSS&order=created_at.desc&limit=20`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+    const lossTrades = await tradesRes.json();
+    if (Array.isArray(lossTrades) && lossTrades.length > 0) {
+      const lossCounts = {};
+      lossTrades.forEach(t => {
+        lossCounts[t.symbol] = (lossCounts[t.symbol] || 0) + 1;
+      });
+      // Avoid symbols with 3+ recent losses
+      botParams.avoidSymbols = Object.entries(lossCounts)
+        .filter(([_, count]) => count >= 3)
+        .map(([symbol]) => symbol);
+      if (botParams.avoidSymbols.length > 0) {
+        console.log(`⚠️ Avoiding symbols with 3+ losses: ${botParams.avoidSymbols.join(', ')}`);
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load learnings:', e.message);
+  }
+}
+
+async function runLearningAnalysis() {
+  try {
+    console.log('🔬 Running learning analysis...');
+    const tradesRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/trades?outcome=not.is.null&action=eq.BUY&select=*`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+    const trades = await tradesRes.json();
+    if (!trades || trades.length < 3) {
+      console.log('📊 Not enough trades to learn from yet');
+      return;
+    }
+
+    const wins = trades.filter(t => t.outcome === 'WIN');
+    const losses = trades.filter(t => t.outcome === 'LOSS');
+    const winRate = (wins.length / trades.length * 100).toFixed(2);
+
+    const winRSI = wins.map(t => parseFloat(t.rsi)).filter(Boolean);
+    const avgWinRSI = winRSI.length > 0 ? winRSI.reduce((a, b) => a + b, 0) / winRSI.length : 65;
+
+    const symbolStats = {};
+    trades.forEach(t => {
+      if (!symbolStats[t.symbol]) symbolStats[t.symbol] = { wins: 0, losses: 0 };
+      if (t.outcome === 'WIN') symbolStats[t.symbol].wins++;
+      else symbolStats[t.symbol].losses++;
+    });
+
+    const bestSymbol = Object.entries(symbolStats)
+      .filter(([_, s]) => s.wins + s.losses >= 2)
+      .sort((a, b) => (b[1].wins / (b[1].wins + b[1].losses)) - (a[1].wins / (a[1].wins + a[1].losses)))[0]?.[0];
+
+    const recommendedMaxRSI = Math.min(avgWinRSI + 5, 70);
+
+    // Save to Supabase
+    await fetch(`${SUPABASE_URL}/rest/v1/learnings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        win_rate: parseFloat(winRate),
+        avg_win_rsi: avgWinRSI.toFixed(2),
+        avg_loss_rsi: losses.length > 0 ? (losses.map(t => parseFloat(t.rsi)).reduce((a, b) => a + b, 0) / losses.length).toFixed(2) : null,
+        recommended_max_rsi: recommendedMaxRSI.toFixed(2),
+        best_symbol: bestSymbol || null,
+        total_trades: trades.length,
+      })
+    });
+
+    // Update bot params immediately
+    botParams.maxRSI = recommendedMaxRSI;
+    if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
+
+    console.log(`✅ Learning complete! Win rate: ${winRate}% | New maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best symbol: ${bestSymbol}`);
+  } catch (e) {
+    console.error('Learning analysis failed:', e.message);
+  }
+}
 
 function getMarketSession() {
   const now = new Date();
@@ -56,8 +186,7 @@ function getMaxPositions() {
 
 function getVolumeMultiplier() {
   const session = getMarketSession();
-  if (session === 'market') return VOLUME_MULTIPLIER;
-  return EXTENDED_VOLUME_MULTIPLIER;
+  return session === 'market' ? VOLUME_MULTIPLIER : EXTENDED_VOLUME_MULTIPLIER;
 }
 
 async function loadExistingPositions() {
@@ -105,14 +234,6 @@ async function logTrade(trade) {
 }
 
 async function placeOrder(symbol, qty, side, extendedHours = false) {
-  const body = {
-    symbol,
-    qty,
-    side,
-    type: extendedHours ? 'limit' : 'market',
-    time_in_force: 'day',
-    extended_hours: extendedHours,
-  };
   const res = await fetch(`${BASE_URL}/v2/orders`, {
     method: 'POST',
     headers: {
@@ -120,12 +241,16 @@ async function placeOrder(symbol, qty, side, extendedHours = false) {
       'APCA-API-SECRET-KEY': SECRET_KEY,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify({
+      symbol, qty, side,
+      type: extendedHours ? 'limit' : 'market',
+      time_in_force: 'day',
+      extended_hours: extendedHours,
+    })
   });
   return res.json();
 }
 
-// Calculate EMA (Exponential Moving Average)
 function calculateEMA(prices, period) {
   if (prices.length < period) return null;
   const k = 2 / (period + 1);
@@ -136,15 +261,12 @@ function calculateEMA(prices, period) {
   return ema;
 }
 
-// Calculate MACD
 function calculateMACD(closes) {
   if (closes.length < 26) return null;
   const ema12 = calculateEMA(closes, 12);
   const ema26 = calculateEMA(closes, 26);
   if (!ema12 || !ema26) return null;
   const macdLine = ema12 - ema26;
-
-  // Signal line = 9 period EMA of MACD
   const macdValues = [];
   for (let i = 26; i <= closes.length; i++) {
     const e12 = calculateEMA(closes.slice(0, i), 12);
@@ -153,13 +275,7 @@ function calculateMACD(closes) {
   }
   const signalLine = calculateEMA(macdValues, 9);
   const histogram = macdLine - (signalLine || 0);
-
-  return {
-    macd: macdLine,
-    signal: signalLine,
-    histogram,
-    bullish: macdLine > signalLine && histogram > 0,
-  };
+  return { macd: macdLine, signal: signalLine, histogram, bullish: macdLine > (signalLine || 0) && histogram > 0 };
 }
 
 function calculateIndicators(closes) {
@@ -181,12 +297,7 @@ async function loadDailyIndicators(symbol) {
   try {
     const res = await fetch(
       `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&limit=100&start=2025-01-01`,
-      {
-        headers: {
-          'APCA-API-KEY-ID': API_KEY,
-          'APCA-API-SECRET-KEY': SECRET_KEY,
-        }
-      }
+      { headers: { 'APCA-API-KEY-ID': API_KEY, 'APCA-API-SECRET-KEY': SECRET_KEY } }
     );
     const data = await res.json();
     const bars = data.bars || [];
@@ -197,21 +308,14 @@ async function loadDailyIndicators(symbol) {
     const indicators = calculateIndicators(closes);
     if (indicators) volumeData[symbol] = { avgVolume };
     return indicators;
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { return null; }
 }
 
 async function loadMinuteIndicators(symbol) {
   try {
     const res = await fetch(
       `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Min&limit=60`,
-      {
-        headers: {
-          'APCA-API-KEY-ID': API_KEY,
-          'APCA-API-SECRET-KEY': SECRET_KEY,
-        }
-      }
+      { headers: { 'APCA-API-KEY-ID': API_KEY, 'APCA-API-SECRET-KEY': SECRET_KEY } }
     );
     const data = await res.json();
     const bars = data.bars || [];
@@ -225,9 +329,7 @@ async function loadMinuteIndicators(symbol) {
       volumeData[symbol].currentVolume = currentVolume;
     }
     return indicators;
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { return null; }
 }
 
 async function loadAllDailyIndicators() {
@@ -256,6 +358,23 @@ function scheduleRefresh() {
   setInterval(async () => {
     await refreshMinuteIndicators();
   }, 2 * 60 * 1000);
+
+  // Run learning analysis every hour
+  setInterval(async () => {
+    await runLearningAnalysis();
+    await loadLearnings();
+  }, 60 * 60 * 1000);
+
+  // Run at market close (21:00 UTC = 2pm MST)
+  setInterval(() => {
+    const now = new Date();
+    const utcHour = now.getUTCHours();
+    const utcMinute = now.getUTCMinutes();
+    if (utcHour === 21 && utcMinute === 0) {
+      console.log('🔔 Market closed — running final learning analysis...');
+      runLearningAnalysis();
+    }
+  }, 60 * 1000);
 }
 
 function isOnCooldown(symbol) {
@@ -272,20 +391,21 @@ function hasVolumeConfirmation(symbol) {
 async function analyzeAndTrade(symbol, currentPrice) {
   if (isTrading) return;
 
+  // Skip avoided symbols
+  if (botParams.avoidSymbols.includes(symbol)) return;
+
   const session = getMarketSession();
   const daily = dailyIndicators[symbol];
   const minute = minuteIndicators[symbol];
   if (!daily) return;
 
   const dailyBullish = daily.ma10 > daily.ma20;
-  const dailyRSIOk = daily.rsi < 70 && daily.rsi > 30;
+  const dailyRSIOk = daily.rsi < botParams.maxRSI && daily.rsi > botParams.minRSI;
   const dailyMACDBullish = daily.macd ? daily.macd.bullish : true;
-
   const minuteBullish = minute ? minute.ma10 > minute.ma20 : true;
-  const minuteRSIOk = minute ? minute.rsi < 70 : true;
+  const minuteRSIOk = minute ? minute.rsi < botParams.maxRSI : true;
   const minuteMACDBullish = minute?.macd ? minute.macd.bullish : true;
 
-  // Always manage existing positions
   if (positions[symbol]) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
@@ -308,6 +428,8 @@ async function analyzeAndTrade(symbol, currentPrice) {
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
       isTrading = false;
+      // Trigger learning after each sell
+      setTimeout(runLearningAnalysis, 2000);
       return;
     }
 
@@ -323,6 +445,8 @@ async function analyzeAndTrade(symbol, currentPrice) {
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
       isTrading = false;
+      // Trigger learning after each sell
+      setTimeout(runLearningAnalysis, 2000);
     }
     return;
   }
@@ -333,16 +457,18 @@ async function analyzeAndTrade(symbol, currentPrice) {
   if (Object.keys(positions).length >= maxPositions) return;
 
   const volumeOk = hasVolumeConfirmation(symbol);
-  const rsiLimit = session === 'market' ? 70 : 65;
-  const strictDailyRSIOk = daily.rsi < rsiLimit && daily.rsi > 30;
+  const rsiLimit = session === 'market' ? botParams.maxRSI : Math.min(botParams.maxRSI, 65);
+  const strictDailyRSIOk = daily.rsi < rsiLimit && daily.rsi > botParams.minRSI;
 
-  // All 4 signals must agree: MA + RSI + MACD + Volume
+  // Boost score for preferred symbols
+  const isPreferred = botParams.preferredSymbols.includes(symbol);
+
   if (dailyBullish && strictDailyRSIOk && dailyMACDBullish && minuteBullish && minuteRSIOk && minuteMACDBullish && volumeOk) {
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
 
     isTrading = true;
-    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${daily.rsi.toFixed(2)} | MACD: ${daily.macd ? daily.macd.histogram.toFixed(4) : 'N/A'} | Session: ${session} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${daily.rsi.toFixed(2)} | MACD: ${daily.macd?.histogram.toFixed(4)} | ${isPreferred ? '⭐ PREFERRED' : ''} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -362,7 +488,7 @@ async function analyzeAndTrade(symbol, currentPrice) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot starting — 24/7 with MACD + Volume + Trailing Stops...');
+  console.log('🤖 Trading bot starting — Self-learning 24/7 system...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -370,7 +496,10 @@ function startBot() {
 
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
 
-  loadAllDailyIndicators().then(() => refreshMinuteIndicators());
+  // Load everything in background
+  loadLearnings().then(() => {
+    loadAllDailyIndicators().then(() => refreshMinuteIndicators());
+  });
   loadExistingPositions();
   scheduleRefresh();
 
@@ -383,10 +512,7 @@ function startBot() {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
         if (!isSubscribed) {
-          ws.send(JSON.stringify({
-            action: 'subscribe',
-            trades: WATCHLIST,
-          }));
+          ws.send(JSON.stringify({ action: 'subscribe', trades: WATCHLIST }));
         }
       }
     }, 30000);
@@ -397,36 +523,24 @@ function startBot() {
     for (const msg of messages) {
       if (msg.T === 'success' && msg.msg === 'authenticated') {
         console.log('✅ Authenticated! Subscribing to live trades...');
-        ws.send(JSON.stringify({
-          action: 'subscribe',
-          trades: WATCHLIST,
-        }));
+        ws.send(JSON.stringify({ action: 'subscribe', trades: WATCHLIST }));
       }
-
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Bot running with MA + RSI + MACD + Volume + Trailing Stops!');
+        console.log('✅ Subscribed! Self-learning bot is now live!');
       }
-
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
       }
-
       if (msg.T === 't') {
-        const symbol = msg.S;
-        const price = msg.p;
-        await analyzeAndTrade(symbol, price);
+        await analyzeAndTrade(msg.S, msg.p);
       }
     }
   });
 
   ws.on('pong', () => {});
-
-  ws.on('error', (err) => {
-    console.error('❌ WebSocket error:', err.message);
-  });
-
-  ws.on('close', (code, reason) => {
+  ws.on('error', (err) => console.error('❌ WebSocket error:', err.message));
+  ws.on('close', (code) => {
     console.log(`Disconnected (${code}), reconnecting in 5 seconds...`);
     if (pingInterval) clearInterval(pingInterval);
     isSubscribed = false;
