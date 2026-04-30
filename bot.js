@@ -14,10 +14,11 @@ const WATCHLIST = [
   'BAC', 'XOM', 'CVX', 'SPY', 'QQQ'
 ];
 
+const MAX_POSITIONS = 5;
 const MAX_TRADE = 200;
 const TAKE_PROFIT_PCT = 0.01;
 const STOP_LOSS_PCT = 0.005;
-const COOLDOWN_MS = 5 * 60 * 1000; // 5 minute cooldown per stock
+const COOLDOWN_MS = 5 * 60 * 1000;
 
 let positions = {};
 let indicators = {};
@@ -147,12 +148,13 @@ function isOnCooldown(symbol) {
 
 async function analyzeAndTrade(symbol, currentPrice) {
   if (isTrading) return;
-  
+
   const ind = indicators[symbol];
   if (!ind) return;
 
   const { ma10, ma20, rsi } = ind;
 
+  // Manage existing position
   if (positions[symbol]) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
@@ -168,7 +170,7 @@ async function analyzeAndTrade(symbol, currentPrice) {
       });
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
-      console.log(`⏳ ${symbol} on cooldown for 5 minutes`);
+      console.log(`⏳ ${symbol} on 5 min cooldown`);
       isTrading = false;
     } else if (pnlPct <= -STOP_LOSS_PCT) {
       isTrading = true;
@@ -181,20 +183,26 @@ async function analyzeAndTrade(symbol, currentPrice) {
       });
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
-      console.log(`⏳ ${symbol} on cooldown for 5 minutes`);
+      console.log(`⏳ ${symbol} on 5 min cooldown`);
       isTrading = false;
     }
     return;
   }
 
+  // Check if we can open a new position
   if (isOnCooldown(symbol)) return;
+  if (Object.keys(positions).length >= MAX_POSITIONS) {
+    console.log(`⚠️ Max positions (${MAX_POSITIONS}) reached, skipping ${symbol}`);
+    return;
+  }
 
+  // Buy signal
   if (ma10 > ma20 && rsi < 70) {
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
 
     isTrading = true;
-    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${rsi.toFixed(2)} | MA10: ${ma10.toFixed(2)} | MA20: ${ma20.toFixed(2)}`);
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${rsi.toFixed(2)} | MA10: ${ma10.toFixed(2)} | MA20: ${ma20.toFixed(2)} | Positions: ${Object.keys(positions).length + 1}/${MAX_POSITIONS}`);
     await placeOrder(symbol, shares, 'buy');
     positions[symbol] = { entryPrice: currentPrice, shares };
     await logTrade({
