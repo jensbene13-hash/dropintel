@@ -146,13 +146,12 @@ async function analyzeAndTrade(symbol, currentPrice) {
 function startBot() {
   console.log('🤖 Trading bot starting...');
   
-  const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/sip');
+  const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
 
   ws.on('open', () => {
-    console.log('✅ Connected to Alpaca WebSocket!');
+    console.log('✅ Connected to Alpaca IEX WebSocket!');
     ws.send(JSON.stringify({ action: 'auth', key: API_KEY, secret: SECRET_KEY }));
     
-    // Keep connection alive
     if (pingInterval) clearInterval(pingInterval);
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -176,7 +175,7 @@ function startBot() {
       }
 
       if (msg.T === 'subscription') {
-        console.log('✅ Subscribed to:', JSON.stringify(msg));
+        console.log('✅ Subscribed successfully!');
       }
 
       if (msg.T === 't') {
@@ -189,7 +188,7 @@ function startBot() {
   });
 
   ws.on('pong', () => {
-    console.log('🏓 Pong received');
+    console.log('🏓 Pong received - connection alive');
   });
 
   ws.on('error', (err) => {
