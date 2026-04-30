@@ -43,9 +43,12 @@ const POSITIVE_KEYWORDS = [
 const MAX_POSITIONS_MARKET = 8;
 const MAX_POSITIONS_EXTENDED = 3;
 const STOP_LOSS_PCT = 0.004;
-const TRAILING_STOP_PCT = 0.004;
 const COOLDOWN_MS = 2 * 60 * 1000;
 const MAX_PRICE_HISTORY = 100;
+
+// Dynamic trailing stop ranges
+const MIN_TRAILING_STOP = 0.003; // 0.3% for stable stocks
+const MAX_TRAILING_STOP = 0.015; // 1.5% for volatile stocks
 
 let botParams = {
   maxRSI: 72,
@@ -58,6 +61,7 @@ let botParams = {
 
 let newsData = {};
 let currentRegime = 'neutral';
+let volatilityData = {};
 
 const SECTOR_MAP = {
   'AAPL': 'tech', 'NVDA': 'tech', 'MSFT': 'tech', 'META': 'tech', 'GOOGL': 'tech',
@@ -80,6 +84,38 @@ let cooldowns = {};
 let pingInterval = null;
 let isTrading = false;
 let isSubscribed = false;
+
+// Calculate volatility as average true range percentage
+function calculateVolatility(symbol) {
+  const prices = realtimePrices[symbol];
+  if (!prices || prices.length < 20) {
+    return volatilityData[symbol] || 0.005; // default 0.5%
+  }
+
+  // Calculate average price change over last 20 ticks
+  const changes = [];
+  for (let i = 1; i < prices.length; i++) {
+    changes.push(Math.abs(prices[i] - prices[i-1]) / prices[i-1]);
+  }
+  const avgChange = changes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+  volatilityData[symbol] = avgChange;
+  return avgChange;
+}
+
+// Get dynamic trailing stop based on volatility
+function getDynamicTrailingStop(symbol) {
+  const volatility = calculateVolatility(symbol);
+
+  // Scale trailing stop with volatility
+  // Low volatility (0.001) → tight stop 0.3%
+  // High volatility (0.01+) → wide stop 1.5%
+  const scaled = Math.min(
+    Math.max(volatility * 1.5, MIN_TRAILING_STOP),
+    MAX_TRAILING_STOP
+  );
+
+  return scaled;
+}
 
 function getMarketRegime() {
   const spy = realtimeIndicators['SPY'] || dailyIndicators['SPY'];
@@ -141,7 +177,7 @@ async function fetchNewsForSymbol(symbol) {
     let sentiment = 'neutral';
     if (score > 2) sentiment = 'positive';
     else if (score < -1) sentiment = 'negative';
-    return { sentiment, score, hasNews: true, articleCount: data.articles.length };
+    return { sentiment, score, hasNews: true };
   } catch (e) {
     return { sentiment: 'neutral', score: 0, hasNews: false };
   }
@@ -186,7 +222,6 @@ function getPositionSize(indicators, isPreferred, newsSentiment) {
   else score += 1;
   if (isPreferred) score += 2;
   if (newsSentiment === 'positive') score += 2;
-  // Boost size in strong regime
   if (currentRegime === 'bull') score += 1;
   if (score >= 13) return 300;
   if (score >= 9) return 200;
@@ -350,22 +385,25 @@ async function loadExistingPositions() {
       positions = {};
       shortPositions = {};
       for (const p of existing) {
+        const trailingStop = getDynamicTrailingStop(p.symbol);
         if (p.side === 'short') {
           shortPositions[p.symbol] = {
             entryPrice: parseFloat(p.avg_entry_price),
             shares: Math.abs(parseFloat(p.qty)),
             lowestPrice: parseFloat(p.current_price || p.avg_entry_price),
-            trailingStop: parseFloat(p.avg_entry_price) * (1 + TRAILING_STOP_PCT),
+            trailingStop: parseFloat(p.avg_entry_price) * (1 + trailingStop),
+            trailingStopPct: trailingStop,
           };
-          console.log(`📋 Loaded SHORT: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price}`);
+          console.log(`📋 Loaded SHORT: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price} | Stop: ${(trailingStop*100).toFixed(2)}%`);
         } else {
           positions[p.symbol] = {
             entryPrice: parseFloat(p.avg_entry_price),
             shares: parseFloat(p.qty),
             highestPrice: parseFloat(p.current_price || p.avg_entry_price),
-            trailingStop: parseFloat(p.avg_entry_price) * (1 - TRAILING_STOP_PCT),
+            trailingStop: parseFloat(p.avg_entry_price) * (1 - trailingStop),
+            trailingStopPct: trailingStop,
           };
-          console.log(`📋 Loaded LONG: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price}`);
+          console.log(`📋 Loaded LONG: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price} | Stop: ${(trailingStop*100).toFixed(2)}%`);
         }
       }
     }
@@ -466,6 +504,11 @@ async function loadDailyIndicators(symbol) {
     const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
     const indicators = calculateIndicators(closes);
     if (indicators) volumeData[symbol] = { avgVolume };
+
+    // Calculate daily volatility from bar data
+    const dailyChanges = closes.slice(-20).map((c, i, arr) => i === 0 ? 0 : Math.abs(c - arr[i-1]) / arr[i-1]);
+    volatilityData[symbol] = dailyChanges.reduce((a, b) => a + b, 0) / dailyChanges.length;
+
     if (!realtimePrices[symbol] || realtimePrices[symbol].length < 26) {
       realtimePrices[symbol] = closes.slice(-MAX_PRICE_HISTORY);
       realtimeIndicators[symbol] = indicators;
@@ -482,7 +525,6 @@ async function loadAllDailyIndicators() {
     if (data) dailyIndicators[symbol] = data;
   }
   console.log(`✅ Indicators loaded for ${Object.keys(dailyIndicators).length} stocks!`);
-  // Update regime after loading indicators
   currentRegime = getMarketRegime();
   console.log(`🌍 Market regime: ${currentRegime}`);
 }
@@ -539,12 +581,17 @@ function getBearishScore(indicators, daily) {
 async function manageShortPosition(symbol, currentPrice, session) {
   const position = shortPositions[symbol];
   if (!position) return;
+
+  // Update trailing stop pct dynamically
+  const newTrailingStopPct = getDynamicTrailingStop(symbol);
+  position.trailingStopPct = newTrailingStopPct;
+
   const pnlPct = (position.entryPrice - currentPrice) / position.entryPrice;
 
   if (currentPrice < position.lowestPrice) {
     position.lowestPrice = currentPrice;
-    position.trailingStop = currentPrice * (1 + TRAILING_STOP_PCT);
-    console.log(`📊 SHORT ${symbol} new low $${currentPrice} | Trailing stop: $${position.trailingStop.toFixed(2)}`);
+    position.trailingStop = currentPrice * (1 + position.trailingStopPct);
+    console.log(`📊 SHORT ${symbol} new low $${currentPrice} | Stop: $${position.trailingStop.toFixed(2)} (${(position.trailingStopPct*100).toFixed(2)}%)`);
   }
 
   if (currentPrice >= position.trailingStop && pnlPct > 0) {
@@ -585,10 +632,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
   updateRealtimeData(symbol, currentPrice, tradeSize);
 
-  // Update regime on every SPY tick
-  if (symbol === 'SPY' || symbol === 'QQQ') {
-    updateRegime();
-  }
+  if (symbol === 'SPY' || symbol === 'QQQ') updateRegime();
 
   const session = getMarketSession();
   const realtime = realtimeIndicators[symbol];
@@ -608,10 +652,14 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
 
+    // Update trailing stop dynamically
+    const newTrailingStopPct = getDynamicTrailingStop(symbol);
+    position.trailingStopPct = newTrailingStopPct;
+
     if (currentPrice > position.highestPrice) {
       position.highestPrice = currentPrice;
-      position.trailingStop = currentPrice * (1 - TRAILING_STOP_PCT);
-      console.log(`📊 ${symbol} new high $${currentPrice} | Trailing stop: $${position.trailingStop.toFixed(2)}`);
+      position.trailingStop = currentPrice * (1 - position.trailingStopPct);
+      console.log(`📊 ${symbol} new high $${currentPrice} | Stop: $${position.trailingStop.toFixed(2)} (${(position.trailingStopPct*100).toFixed(2)}%)`);
     }
 
     if (currentPrice <= position.trailingStop && pnlPct > 0) {
@@ -652,8 +700,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (isOnCooldown(symbol)) return;
 
   const totalPositions = Object.keys(positions).length + Object.keys(shortPositions).length;
-
-  // Reduce positions in neutral market
   const adjustedMax = currentRegime === 'neutral' ? Math.floor(maxPositions * 0.6) : maxPositions;
   if (totalPositions >= adjustedMax) return;
 
@@ -665,18 +711,21 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   const shares = Math.floor(maxTrade / currentPrice);
   if (shares < 1) return;
 
-  // LONG — only in bull or neutral, not in bear market
+  const trailingStopPct = getDynamicTrailingStop(symbol);
+  const volatilityPct = (trailingStopPct * 100).toFixed(2);
+
   if (currentRegime !== 'bear' && signalScore >= 3 && momentum >= 0) {
     isTrading = true;
     const regimeIcon = currentRegime === 'bull' ? '🐂' : '➡️';
     const newsIcon = news.sentiment === 'positive' ? '📰✅' : '';
-    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | ${regimeIcon} ${currentRegime} | ${newsIcon} | Size: $${maxTrade} | Positions: ${totalPositions + 1}/${adjustedMax}`);
+    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | ${regimeIcon} | ${newsIcon} | Stop: ${volatilityPct}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${adjustedMax}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
       shares,
       highestPrice: currentPrice,
-      trailingStop: currentPrice * (1 - TRAILING_STOP_PCT),
+      trailingStop: currentPrice * (1 - trailingStopPct),
+      trailingStopPct,
     };
     await logTrade({
       symbol, action: 'BUY', price: currentPrice, shares,
@@ -689,17 +738,17 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     return;
   }
 
-  // SHORT — only in bear or neutral, not in bull market
   if (currentRegime !== 'bull' && bearishScore >= 3 && momentum < 0) {
     isTrading = true;
     const regimeIcon = currentRegime === 'bear' ? '🐻' : '➡️';
-    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | ${regimeIcon} ${currentRegime} | Size: $${maxTrade} | Positions: ${totalPositions + 1}/${adjustedMax}`);
+    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | ${regimeIcon} | Stop: ${volatilityPct}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${adjustedMax}`);
     await placeOrder(symbol, shares, 'sell', session !== 'market');
     shortPositions[symbol] = {
       entryPrice: currentPrice,
       shares,
       lowestPrice: currentPrice,
-      trailingStop: currentPrice * (1 + TRAILING_STOP_PCT),
+      trailingStop: currentPrice * (1 + trailingStopPct),
+      trailingStopPct,
     };
     await logTrade({
       symbol, action: 'SHORT', price: currentPrice, shares,
@@ -713,7 +762,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Market Regime + Long/Short + News + Self-Learning...');
+  console.log('🤖 Trading bot — Dynamic Stops + Regime + Long/Short + News + Learning...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -751,7 +800,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Market Regime bot is now live!');
+        console.log('✅ Subscribed! Dynamic Stops bot is now live!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
