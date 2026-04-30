@@ -19,6 +19,7 @@ const TAKE_PROFIT_PCT = 0.01;
 const STOP_LOSS_PCT = 0.005;
 
 let positions = {};
+let indicators = {};
 let pingInterval = null;
 
 async function logTrade(trade) {
@@ -57,7 +58,7 @@ async function placeOrder(symbol, qty, side) {
   return res.json();
 }
 
-async function getHistoricalData(symbol) {
+async function loadHistoricalData(symbol) {
   try {
     const res = await fetch(
       `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&limit=100&start=2025-01-01`,
@@ -69,94 +70,112 @@ async function getHistoricalData(symbol) {
       }
     );
     const data = await res.json();
-    return data.bars || [];
+    const bars = data.bars || [];
+    if (bars.length < 20) return null;
+
+    const closes = bars.map(b => b.c);
+    const ma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
+    const ma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    const changes = closes.slice(-15).map((c, i, arr) => i === 0 ? 0 : c - arr[i - 1]);
+    const gains = changes.map(c => c > 0 ? c : 0);
+    const losses = changes.map(c => c < 0 ? Math.abs(c) : 0);
+    const avgGain = gains.reduce((a, b) => a + b, 0) / 14;
+    const avgLoss = losses.reduce((a, b) => a + b, 0) / 14;
+    const rs = avgGain / (avgLoss || 1);
+    const rsi = 100 - (100 / (1 + rs));
+
+    return { ma10, ma20, rsi };
   } catch (e) {
-    return [];
+    console.error(`Failed to load data for ${symbol}:`, e.message);
+    return null;
   }
 }
 
-function calculateIndicators(bars) {
-  if (bars.length < 20) return null;
-  const closes = bars.map(b => b.c);
-  const ma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
-  const ma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
-  const changes = closes.slice(-15).map((c, i, arr) => i === 0 ? 0 : c - arr[i - 1]);
-  const gains = changes.map(c => c > 0 ? c : 0);
-  const losses = changes.map(c => c < 0 ? Math.abs(c) : 0);
-  const avgGain = gains.reduce((a, b) => a + b, 0) / 14;
-  const avgLoss = losses.reduce((a, b) => a + b, 0) / 14;
-  const rs = avgGain / (avgLoss || 1);
-  const rsi = 100 - (100 / (1 + rs));
-  return { ma10, ma20, rsi };
+async function loadAllIndicators() {
+  console.log('📊 Loading historical indicators for all stocks...');
+  for (const symbol of WATCHLIST) {
+    const data = await loadHistoricalData(symbol);
+    if (data) {
+      indicators[symbol] = data;
+      console.log(`✅ ${symbol} | RSI: ${data.rsi.toFixed(2)} | MA10: ${data.ma10.toFixed(2)} | MA20: ${data.ma20.toFixed(2)}`);
+    }
+  }
+  console.log('✅ All indicators loaded! Bot is ready to trade.');
+}
+
+// Refresh indicators every 30 minutes
+function scheduleIndicatorRefresh() {
+  setInterval(async () => {
+    console.log('🔄 Refreshing indicators...');
+    await loadAllIndicators();
+  }, 30 * 60 * 1000);
 }
 
 async function analyzeAndTrade(symbol, currentPrice) {
-  try {
-    const bars = await getHistoricalData(symbol);
-    const indicators = calculateIndicators(bars);
-    if (!indicators) return;
+  const ind = indicators[symbol];
+  if (!ind) return;
 
-    const { ma10, ma20, rsi } = indicators;
+  const { ma10, ma20, rsi } = ind;
 
-    if (positions[symbol]) {
-      const position = positions[symbol];
-      const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
+  if (positions[symbol]) {
+    const position = positions[symbol];
+    const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
 
-      if (pnlPct >= TAKE_PROFIT_PCT) {
-        console.log(`🟢 TAKE PROFIT: Selling ${symbol} at ${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
-        await placeOrder(symbol, position.shares, 'sell');
-        await logTrade({
-          symbol, action: 'SELL', price: currentPrice,
-          shares: position.shares, outcome: 'WIN',
-          profit_loss: ((currentPrice - position.entryPrice) * position.shares).toFixed(2),
-        });
-        delete positions[symbol];
-      } else if (pnlPct <= -STOP_LOSS_PCT) {
-        console.log(`🔴 STOP LOSS: Selling ${symbol} at ${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
-        await placeOrder(symbol, position.shares, 'sell');
-        await logTrade({
-          symbol, action: 'SELL', price: currentPrice,
-          shares: position.shares, outcome: 'LOSS',
-          profit_loss: ((currentPrice - position.entryPrice) * position.shares).toFixed(2),
-        });
-        delete positions[symbol];
-      }
-      return;
-    }
-
-    if (ma10 > ma20 && rsi < 70) {
-      const shares = Math.floor(MAX_TRADE / currentPrice);
-      if (shares < 1) return;
-
-      console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${rsi.toFixed(2)} | MA10: ${ma10.toFixed(2)} | MA20: ${ma20.toFixed(2)}`);
-      await placeOrder(symbol, shares, 'buy');
-      positions[symbol] = { entryPrice: currentPrice, shares };
+    if (pnlPct >= TAKE_PROFIT_PCT) {
+      console.log(`🟢 TAKE PROFIT: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
+      await placeOrder(symbol, position.shares, 'sell');
       await logTrade({
-        symbol, action: 'BUY', price: currentPrice, shares,
-        rsi: parseFloat(rsi.toFixed(2)),
-        ma10: parseFloat(ma10.toFixed(2)),
-        ma20: parseFloat(ma20.toFixed(2)),
+        symbol, action: 'SELL', price: currentPrice,
+        shares: position.shares, outcome: 'WIN',
+        profit_loss: ((currentPrice - position.entryPrice) * position.shares).toFixed(2),
       });
+      delete positions[symbol];
+    } else if (pnlPct <= -STOP_LOSS_PCT) {
+      console.log(`🔴 STOP LOSS: Selling ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
+      await placeOrder(symbol, position.shares, 'sell');
+      await logTrade({
+        symbol, action: 'SELL', price: currentPrice,
+        shares: position.shares, outcome: 'LOSS',
+        profit_loss: ((currentPrice - position.entryPrice) * position.shares).toFixed(2),
+      });
+      delete positions[symbol];
     }
-  } catch (e) {
-    console.error(`Error analyzing ${symbol}:`, e.message);
+    return;
+  }
+
+  if (ma10 > ma20 && rsi < 70) {
+    const shares = Math.floor(MAX_TRADE / currentPrice);
+    if (shares < 1) return;
+
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${rsi.toFixed(2)} | MA10: ${ma10.toFixed(2)} | MA20: ${ma20.toFixed(2)}`);
+    await placeOrder(symbol, shares, 'buy');
+    positions[symbol] = { entryPrice: currentPrice, shares };
+    await logTrade({
+      symbol, action: 'BUY', price: currentPrice, shares,
+      rsi: parseFloat(rsi.toFixed(2)),
+      ma10: parseFloat(ma10.toFixed(2)),
+      ma20: parseFloat(ma20.toFixed(2)),
+    });
   }
 }
 
-function startBot() {
+async function startBot() {
   console.log('🤖 Trading bot starting...');
-  
+
+  // Load all indicators once before connecting
+  await loadAllIndicators();
+  scheduleIndicatorRefresh();
+
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
 
   ws.on('open', () => {
     console.log('✅ Connected to Alpaca IEX WebSocket!');
     ws.send(JSON.stringify({ action: 'auth', key: API_KEY, secret: SECRET_KEY }));
-    
+
     if (pingInterval) clearInterval(pingInterval);
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
-        console.log('🔄 Ping sent to keep connection alive');
       }
     }, 10000);
   });
@@ -164,8 +183,6 @@ function startBot() {
   ws.on('message', async (data) => {
     const messages = JSON.parse(data);
     for (const msg of messages) {
-      console.log('📨 Message:', JSON.stringify(msg));
-      
       if (msg.T === 'success' && msg.msg === 'authenticated') {
         console.log('✅ Authenticated! Subscribing to live trades...');
         ws.send(JSON.stringify({
@@ -175,28 +192,25 @@ function startBot() {
       }
 
       if (msg.T === 'subscription') {
-        console.log('✅ Subscribed successfully!');
+        console.log('✅ Subscribed! Bot is now trading live!');
       }
 
       if (msg.T === 't') {
         const symbol = msg.S;
         const price = msg.p;
-        console.log(`💹 ${symbol}: $${price}`);
         await analyzeAndTrade(symbol, price);
       }
     }
   });
 
-  ws.on('pong', () => {
-    console.log('🏓 Pong received - connection alive');
-  });
+  ws.on('pong', () => {});
 
   ws.on('error', (err) => {
     console.error('❌ WebSocket error:', err.message);
   });
 
   ws.on('close', (code, reason) => {
-    console.log(`Disconnected (${code}: ${reason}), reconnecting in 5 seconds...`);
+    console.log(`Disconnected (${code}), reconnecting in 5 seconds...`);
     if (pingInterval) clearInterval(pingInterval);
     setTimeout(startBot, 5000);
   });
