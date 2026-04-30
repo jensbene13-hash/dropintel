@@ -25,13 +25,23 @@ const COOLDOWN_MS = 5 * 60 * 1000;
 const VOLUME_MULTIPLIER = 1.2;
 const EXTENDED_VOLUME_MULTIPLIER = 2.0;
 
-// Default parameters — will be overridden by learnings
 let botParams = {
   maxRSI: 70,
   minRSI: 30,
-  minMACDHistogram: 0,
   avoidSymbols: [],
   preferredSymbols: [],
+  bestHours: [],
+  bestSectors: [],
+};
+
+const SECTOR_MAP = {
+  'AAPL': 'tech', 'NVDA': 'tech', 'MSFT': 'tech', 'META': 'tech', 'GOOGL': 'tech',
+  'TSLA': 'tech', 'AMZN': 'tech', 'AMD': 'tech', 'CRM': 'tech', 'INTC': 'tech',
+  'JPM': 'finance', 'BAC': 'finance', 'GS': 'finance', 'V': 'finance', 'MA': 'finance',
+  'WFC': 'finance', 'XLF': 'finance',
+  'JNJ': 'healthcare', 'PFE': 'healthcare', 'UNH': 'healthcare', 'LLY': 'healthcare',
+  'XOM': 'energy', 'CVX': 'energy', 'COP': 'energy', 'EOG': 'energy',
+  'SPY': 'etf', 'QQQ': 'etf', 'DIA': 'etf', 'IWM': 'etf', 'VTI': 'etf',
 };
 
 let positions = {};
@@ -48,43 +58,29 @@ async function loadLearnings() {
     console.log('🧠 Loading learnings from Supabase...');
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/learnings?order=created_at.desc&limit=1`,
-      {
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
-        }
-      }
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
     );
     const data = await res.json();
     if (data && data.length > 0) {
       const learning = data[0];
       botParams.maxRSI = parseFloat(learning.recommended_max_rsi) || 70;
-      console.log(`📊 Win rate: ${learning.win_rate}% | Best RSI max: ${botParams.maxRSI} | Best symbol: ${learning.best_symbol}`);
-      if (learning.best_symbol) {
-        botParams.preferredSymbols = [learning.best_symbol];
-      }
-      console.log(`⚙️ Self-adjusted parameters: maxRSI=${botParams.maxRSI}`);
+      if (learning.best_symbol) botParams.preferredSymbols = [learning.best_symbol];
+      if (learning.best_hours) botParams.bestHours = JSON.parse(learning.best_hours || '[]');
+      if (learning.best_sectors) botParams.bestSectors = JSON.parse(learning.best_sectors || '[]');
+      console.log(`📊 Learnings loaded! Win rate: ${learning.win_rate}% | maxRSI: ${botParams.maxRSI} | Best symbol: ${learning.best_symbol} | Best hours: ${botParams.bestHours.join(',')} | Best sectors: ${botParams.bestSectors.join(',')}`);
     } else {
       console.log('📊 No learnings yet — using default parameters');
     }
 
-    // Also analyze recent trades to find losing symbols
+    // Find symbols with 3+ recent losses to avoid
     const tradesRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/trades?outcome=eq.LOSS&order=created_at.desc&limit=20`,
-      {
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
-        }
-      }
+      `${SUPABASE_URL}/rest/v1/trades?outcome=eq.LOSS&order=created_at.desc&limit=30`,
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
     );
     const lossTrades = await tradesRes.json();
     if (Array.isArray(lossTrades) && lossTrades.length > 0) {
       const lossCounts = {};
-      lossTrades.forEach(t => {
-        lossCounts[t.symbol] = (lossCounts[t.symbol] || 0) + 1;
-      });
-      // Avoid symbols with 3+ recent losses
+      lossTrades.forEach(t => { lossCounts[t.symbol] = (lossCounts[t.symbol] || 0) + 1; });
       botParams.avoidSymbols = Object.entries(lossCounts)
         .filter(([_, count]) => count >= 3)
         .map(([symbol]) => symbol);
@@ -99,19 +95,14 @@ async function loadLearnings() {
 
 async function runLearningAnalysis() {
   try {
-    console.log('🔬 Running learning analysis...');
+    console.log('🔬 Running multi-dimensional learning analysis...');
     const tradesRes = await fetch(
       `${SUPABASE_URL}/rest/v1/trades?outcome=not.is.null&action=eq.BUY&select=*`,
-      {
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
-        }
-      }
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
     );
     const trades = await tradesRes.json();
     if (!trades || trades.length < 3) {
-      console.log('📊 Not enough trades to learn from yet');
+      console.log('📊 Not enough trades yet');
       return;
     }
 
@@ -119,23 +110,56 @@ async function runLearningAnalysis() {
     const losses = trades.filter(t => t.outcome === 'LOSS');
     const winRate = (wins.length / trades.length * 100).toFixed(2);
 
+    // 1. Best RSI range
     const winRSI = wins.map(t => parseFloat(t.rsi)).filter(Boolean);
     const avgWinRSI = winRSI.length > 0 ? winRSI.reduce((a, b) => a + b, 0) / winRSI.length : 65;
+    const recommendedMaxRSI = Math.min(avgWinRSI + 5, 70);
 
+    // 2. Best performing symbols
     const symbolStats = {};
     trades.forEach(t => {
-      if (!symbolStats[t.symbol]) symbolStats[t.symbol] = { wins: 0, losses: 0 };
+      if (!symbolStats[t.symbol]) symbolStats[t.symbol] = { wins: 0, losses: 0, totalPL: 0 };
       if (t.outcome === 'WIN') symbolStats[t.symbol].wins++;
       else symbolStats[t.symbol].losses++;
+      symbolStats[t.symbol].totalPL += parseFloat(t.profit_loss || 0);
     });
-
     const bestSymbol = Object.entries(symbolStats)
       .filter(([_, s]) => s.wins + s.losses >= 2)
       .sort((a, b) => (b[1].wins / (b[1].wins + b[1].losses)) - (a[1].wins / (a[1].wins + a[1].losses)))[0]?.[0];
 
-    const recommendedMaxRSI = Math.min(avgWinRSI + 5, 70);
+    // 3. Best hours of day
+    const hourStats = {};
+    trades.forEach(t => {
+      const hour = new Date(t.created_at).getUTCHours();
+      if (!hourStats[hour]) hourStats[hour] = { wins: 0, losses: 0 };
+      if (t.outcome === 'WIN') hourStats[hour].wins++;
+      else hourStats[hour].losses++;
+    });
+    const bestHours = Object.entries(hourStats)
+      .filter(([_, s]) => s.wins + s.losses >= 2)
+      .sort((a, b) => (b[1].wins / (b[1].wins + b[1].losses)) - (a[1].wins / (a[1].wins + a[1].losses)))
+      .slice(0, 3)
+      .map(([hour]) => parseInt(hour));
 
-    // Save to Supabase
+    // 4. Best performing sectors
+    const sectorStats = {};
+    trades.forEach(t => {
+      const sector = SECTOR_MAP[t.symbol] || 'unknown';
+      if (!sectorStats[sector]) sectorStats[sector] = { wins: 0, losses: 0 };
+      if (t.outcome === 'WIN') sectorStats[sector].wins++;
+      else sectorStats[sector].losses++;
+    });
+    const bestSectors = Object.entries(sectorStats)
+      .filter(([_, s]) => s.wins + s.losses >= 2)
+      .sort((a, b) => (b[1].wins / (b[1].wins + b[1].losses)) - (a[1].wins / (a[1].wins + a[1].losses)))
+      .slice(0, 2)
+      .map(([sector]) => sector);
+
+    // 5. Best MACD histogram range
+    const winScores = wins.map(t => parseFloat(t.score || 0)).filter(Boolean);
+    const avgWinScore = winScores.length > 0 ? winScores.reduce((a, b) => a + b, 0) / winScores.length : 0;
+
+    // Save learnings
     await fetch(`${SUPABASE_URL}/rest/v1/learnings`, {
       method: 'POST',
       headers: {
@@ -147,9 +171,11 @@ async function runLearningAnalysis() {
       body: JSON.stringify({
         win_rate: parseFloat(winRate),
         avg_win_rsi: avgWinRSI.toFixed(2),
-        avg_loss_rsi: losses.length > 0 ? (losses.map(t => parseFloat(t.rsi)).reduce((a, b) => a + b, 0) / losses.length).toFixed(2) : null,
+        avg_loss_rsi: losses.length > 0 ? (losses.map(t => parseFloat(t.rsi)).filter(Boolean).reduce((a, b) => a + b, 0) / losses.length).toFixed(2) : null,
         recommended_max_rsi: recommendedMaxRSI.toFixed(2),
         best_symbol: bestSymbol || null,
+        best_hours: JSON.stringify(bestHours),
+        best_sectors: JSON.stringify(bestSectors),
         total_trades: trades.length,
       })
     });
@@ -157,8 +183,14 @@ async function runLearningAnalysis() {
     // Update bot params immediately
     botParams.maxRSI = recommendedMaxRSI;
     if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
+    if (bestHours.length > 0) botParams.bestHours = bestHours;
+    if (bestSectors.length > 0) botParams.bestSectors = bestSectors;
 
-    console.log(`✅ Learning complete! Win rate: ${winRate}% | New maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best symbol: ${bestSymbol}`);
+    console.log(`✅ Learning complete!`);
+    console.log(`📊 Win rate: ${winRate}% | Trades: ${trades.length}`);
+    console.log(`📈 Best RSI max: ${recommendedMaxRSI.toFixed(2)} | Avg win RSI: ${avgWinRSI.toFixed(2)}`);
+    console.log(`⭐ Best symbol: ${bestSymbol} | Best hours: ${bestHours.join(',')} | Best sectors: ${bestSectors.join(',')}`);
+    console.log(`📉 Avg MACD histogram on wins: ${avgWinScore.toFixed(4)}`);
   } catch (e) {
     console.error('Learning analysis failed:', e.message);
   }
@@ -185,17 +217,13 @@ function getMaxPositions() {
 }
 
 function getVolumeMultiplier() {
-  const session = getMarketSession();
-  return session === 'market' ? VOLUME_MULTIPLIER : EXTENDED_VOLUME_MULTIPLIER;
+  return getMarketSession() === 'market' ? VOLUME_MULTIPLIER : EXTENDED_VOLUME_MULTIPLIER;
 }
 
 async function loadExistingPositions() {
   try {
     const res = await fetch(`${BASE_URL}/v2/positions`, {
-      headers: {
-        'APCA-API-KEY-ID': API_KEY,
-        'APCA-API-SECRET-KEY': SECRET_KEY,
-      }
+      headers: { 'APCA-API-KEY-ID': API_KEY, 'APCA-API-SECRET-KEY': SECRET_KEY }
     });
     const existing = await res.json();
     if (Array.isArray(existing)) {
@@ -359,18 +387,14 @@ function scheduleRefresh() {
     await refreshMinuteIndicators();
   }, 2 * 60 * 1000);
 
-  // Run learning analysis every hour
   setInterval(async () => {
     await runLearningAnalysis();
     await loadLearnings();
   }, 60 * 60 * 1000);
 
-  // Run at market close (21:00 UTC = 2pm MST)
   setInterval(() => {
     const now = new Date();
-    const utcHour = now.getUTCHours();
-    const utcMinute = now.getUTCMinutes();
-    if (utcHour === 21 && utcMinute === 0) {
+    if (now.getUTCHours() === 21 && now.getUTCMinutes() === 0) {
       console.log('🔔 Market closed — running final learning analysis...');
       runLearningAnalysis();
     }
@@ -388,10 +412,20 @@ function hasVolumeConfirmation(symbol) {
   return vol.currentVolume >= vol.avgVolume * getVolumeMultiplier();
 }
 
+function isGoodHour() {
+  if (botParams.bestHours.length === 0) return true;
+  const utcHour = new Date().getUTCHours();
+  return botParams.bestHours.includes(utcHour);
+}
+
+function isGoodSector(symbol) {
+  if (botParams.bestSectors.length === 0) return true;
+  const sector = SECTOR_MAP[symbol] || 'unknown';
+  return botParams.bestSectors.includes(sector);
+}
+
 async function analyzeAndTrade(symbol, currentPrice) {
   if (isTrading) return;
-
-  // Skip avoided symbols
   if (botParams.avoidSymbols.includes(symbol)) return;
 
   const session = getMarketSession();
@@ -428,7 +462,6 @@ async function analyzeAndTrade(symbol, currentPrice) {
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
       isTrading = false;
-      // Trigger learning after each sell
       setTimeout(runLearningAnalysis, 2000);
       return;
     }
@@ -445,7 +478,6 @@ async function analyzeAndTrade(symbol, currentPrice) {
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
       isTrading = false;
-      // Trigger learning after each sell
       setTimeout(runLearningAnalysis, 2000);
     }
     return;
@@ -459,16 +491,20 @@ async function analyzeAndTrade(symbol, currentPrice) {
   const volumeOk = hasVolumeConfirmation(symbol);
   const rsiLimit = session === 'market' ? botParams.maxRSI : Math.min(botParams.maxRSI, 65);
   const strictDailyRSIOk = daily.rsi < rsiLimit && daily.rsi > botParams.minRSI;
-
-  // Boost score for preferred symbols
   const isPreferred = botParams.preferredSymbols.includes(symbol);
+  const goodHour = isGoodHour();
+  const goodSector = isGoodSector(symbol);
 
   if (dailyBullish && strictDailyRSIOk && dailyMACDBullish && minuteBullish && minuteRSIOk && minuteMACDBullish && volumeOk) {
+    // Require good hour AND good sector once we have enough data
+    if (trades > 20 && !goodHour) return;
+    if (trades > 20 && !goodSector && !isPreferred) return;
+
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
 
     isTrading = true;
-    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${daily.rsi.toFixed(2)} | MACD: ${daily.macd?.histogram.toFixed(4)} | ${isPreferred ? '⭐ PREFERRED' : ''} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${daily.rsi.toFixed(2)} | MACD: ${daily.macd?.histogram.toFixed(4)} | ${isPreferred ? '⭐ PREFERRED' : ''} | ${goodSector ? '🏭 GOOD SECTOR' : ''} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -488,7 +524,7 @@ async function analyzeAndTrade(symbol, currentPrice) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot starting — Self-learning 24/7 system...');
+  console.log('🤖 Trading bot starting — Multi-dimensional self-learning 24/7 system...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -496,7 +532,6 @@ function startBot() {
 
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
 
-  // Load everything in background
   loadLearnings().then(() => {
     loadAllDailyIndicators().then(() => refreshMinuteIndicators());
   });
@@ -527,7 +562,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Self-learning bot is now live!');
+        console.log('✅ Subscribed! Multi-dimensional self-learning bot is now live!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
