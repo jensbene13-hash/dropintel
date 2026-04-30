@@ -17,10 +17,13 @@ const WATCHLIST = [
 const MAX_TRADE = 200;
 const TAKE_PROFIT_PCT = 0.01;
 const STOP_LOSS_PCT = 0.005;
+const COOLDOWN_MS = 5 * 60 * 1000; // 5 minute cooldown per stock
 
 let positions = {};
 let indicators = {};
+let cooldowns = {};
 let pingInterval = null;
+let isTrading = false;
 
 async function loadExistingPositions() {
   try {
@@ -32,6 +35,7 @@ async function loadExistingPositions() {
     });
     const existing = await res.json();
     if (Array.isArray(existing)) {
+      positions = {};
       for (const p of existing) {
         positions[p.symbol] = {
           entryPrice: parseFloat(p.avg_entry_price),
@@ -129,12 +133,21 @@ async function loadAllIndicators() {
 
 function scheduleIndicatorRefresh() {
   setInterval(async () => {
-    console.log('🔄 Refreshing indicators...');
+    console.log('🔄 Refreshing indicators and positions...');
     await loadAllIndicators();
+    await loadExistingPositions();
   }, 30 * 60 * 1000);
 }
 
+function isOnCooldown(symbol) {
+  if (!cooldowns[symbol]) return false;
+  const elapsed = Date.now() - cooldowns[symbol];
+  return elapsed < COOLDOWN_MS;
+}
+
 async function analyzeAndTrade(symbol, currentPrice) {
+  if (isTrading) return;
+  
   const ind = indicators[symbol];
   if (!ind) return;
 
@@ -145,6 +158,7 @@ async function analyzeAndTrade(symbol, currentPrice) {
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
 
     if (pnlPct >= TAKE_PROFIT_PCT) {
+      isTrading = true;
       console.log(`🟢 TAKE PROFIT: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
       await placeOrder(symbol, position.shares, 'sell');
       await logTrade({
@@ -153,7 +167,11 @@ async function analyzeAndTrade(symbol, currentPrice) {
         profit_loss: ((currentPrice - position.entryPrice) * position.shares).toFixed(2),
       });
       delete positions[symbol];
+      cooldowns[symbol] = Date.now();
+      console.log(`⏳ ${symbol} on cooldown for 5 minutes`);
+      isTrading = false;
     } else if (pnlPct <= -STOP_LOSS_PCT) {
+      isTrading = true;
       console.log(`🔴 STOP LOSS: Selling ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
       await placeOrder(symbol, position.shares, 'sell');
       await logTrade({
@@ -162,14 +180,20 @@ async function analyzeAndTrade(symbol, currentPrice) {
         profit_loss: ((currentPrice - position.entryPrice) * position.shares).toFixed(2),
       });
       delete positions[symbol];
+      cooldowns[symbol] = Date.now();
+      console.log(`⏳ ${symbol} on cooldown for 5 minutes`);
+      isTrading = false;
     }
     return;
   }
+
+  if (isOnCooldown(symbol)) return;
 
   if (ma10 > ma20 && rsi < 70) {
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
 
+    isTrading = true;
     console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${rsi.toFixed(2)} | MA10: ${ma10.toFixed(2)} | MA20: ${ma20.toFixed(2)}`);
     await placeOrder(symbol, shares, 'buy');
     positions[symbol] = { entryPrice: currentPrice, shares };
@@ -179,6 +203,7 @@ async function analyzeAndTrade(symbol, currentPrice) {
       ma10: parseFloat(ma10.toFixed(2)),
       ma20: parseFloat(ma20.toFixed(2)),
     });
+    isTrading = false;
   }
 }
 
@@ -200,7 +225,7 @@ async function startBot() {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
       }
-    }, 10000);
+    }, 30000);
   });
 
   ws.on('message', async (data) => {
@@ -226,7 +251,9 @@ async function startBot() {
     }
   });
 
-  ws.on('pong', () => {});
+  ws.on('pong', () => {
+    console.log('🏓 Connection alive');
+  });
 
   ws.on('error', (err) => {
     console.error('❌ WebSocket error:', err.message);
