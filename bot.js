@@ -1,11 +1,12 @@
-const Alpaca = require('@alpacahq/alpaca-trade-api');
+const WebSocket = require('ws');
 const fetch = require('node-fetch');
 
-const alpaca = new Alpaca({
-  keyId: process.env.ALPACA_API_KEY,
-  secretKey: process.env.ALPACA_SECRET_KEY,
-  paper: true,
-});
+const API_KEY = process.env.ALPACA_API_KEY;
+const SECRET_KEY = process.env.ALPACA_SECRET_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY;
+const BASE_URL = 'https://paper-api.alpaca.markets';
+const DATA_URL = 'https://data.alpaca.markets';
 
 const WATCHLIST = [
   'AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL',
@@ -16,11 +17,8 @@ const WATCHLIST = [
 const MAX_TRADE = 200;
 const TAKE_PROFIT_PCT = 0.01;
 const STOP_LOSS_PCT = 0.005;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY;
 
 let positions = {};
-let lastAnalysis = {};
 
 async function logTrade(trade) {
   try {
@@ -39,14 +37,33 @@ async function logTrade(trade) {
   }
 }
 
+async function placeOrder(symbol, qty, side) {
+  const res = await fetch(`${BASE_URL}/v2/orders`, {
+    method: 'POST',
+    headers: {
+      'APCA-API-KEY-ID': API_KEY,
+      'APCA-API-SECRET-KEY': SECRET_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      symbol,
+      qty,
+      side,
+      type: 'market',
+      time_in_force: 'day',
+    })
+  });
+  return res.json();
+}
+
 async function getHistoricalData(symbol) {
   try {
     const res = await fetch(
-      `https://data.alpaca.markets/v2/stocks/${symbol}/bars?timeframe=1Day&limit=100&start=2025-01-01`,
+      `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&limit=100&start=2025-01-01`,
       {
         headers: {
-          'APCA-API-KEY-ID': process.env.ALPACA_API_KEY,
-          'APCA-API-SECRET-KEY': process.env.ALPACA_SECRET_KEY,
+          'APCA-API-KEY-ID': API_KEY,
+          'APCA-API-SECRET-KEY': SECRET_KEY,
         }
       }
     );
@@ -79,46 +96,26 @@ async function analyzeAndTrade(symbol, currentPrice) {
     if (!indicators) return;
 
     const { ma10, ma20, rsi } = indicators;
-    lastAnalysis[symbol] = { ma10, ma20, rsi, currentPrice };
 
-    // Check existing position
     if (positions[symbol]) {
       const position = positions[symbol];
       const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
 
       if (pnlPct >= TAKE_PROFIT_PCT) {
         console.log(`🟢 TAKE PROFIT: Selling ${symbol} at ${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
-        await alpaca.createOrder({
-          symbol,
-          qty: position.shares,
-          side: 'sell',
-          type: 'market',
-          time_in_force: 'day',
-        });
+        await placeOrder(symbol, position.shares, 'sell');
         await logTrade({
-          symbol,
-          action: 'SELL',
-          price: currentPrice,
-          shares: position.shares,
-          outcome: 'WIN',
+          symbol, action: 'SELL', price: currentPrice,
+          shares: position.shares, outcome: 'WIN',
           profit_loss: ((currentPrice - position.entryPrice) * position.shares).toFixed(2),
         });
         delete positions[symbol];
       } else if (pnlPct <= -STOP_LOSS_PCT) {
         console.log(`🔴 STOP LOSS: Selling ${symbol} at ${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
-        await alpaca.createOrder({
-          symbol,
-          qty: position.shares,
-          side: 'sell',
-          type: 'market',
-          time_in_force: 'day',
-        });
+        await placeOrder(symbol, position.shares, 'sell');
         await logTrade({
-          symbol,
-          action: 'SELL',
-          price: currentPrice,
-          shares: position.shares,
-          outcome: 'LOSS',
+          symbol, action: 'SELL', price: currentPrice,
+          shares: position.shares, outcome: 'LOSS',
           profit_loss: ((currentPrice - position.entryPrice) * position.shares).toFixed(2),
         });
         delete positions[symbol];
@@ -126,28 +123,15 @@ async function analyzeAndTrade(symbol, currentPrice) {
       return;
     }
 
-    // Check for buy signal
-    if (ma10 > ma20 && rsi < 70 && !positions[symbol]) {
+    if (ma10 > ma20 && rsi < 70) {
       const shares = Math.floor(MAX_TRADE / currentPrice);
       if (shares < 1) return;
 
-      console.log(`📈 BUY SIGNAL: ${symbol} at ${currentPrice} | RSI: ${rsi.toFixed(2)} | MA10: ${ma10.toFixed(2)} | MA20: ${ma20.toFixed(2)}`);
-      
-      await alpaca.createOrder({
-        symbol,
-        qty: shares,
-        side: 'buy',
-        type: 'market',
-        time_in_force: 'day',
-      });
-
+      console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${rsi.toFixed(2)} | MA10: ${ma10.toFixed(2)} | MA20: ${ma20.toFixed(2)}`);
+      await placeOrder(symbol, shares, 'buy');
       positions[symbol] = { entryPrice: currentPrice, shares };
-
       await logTrade({
-        symbol,
-        action: 'BUY',
-        price: currentPrice,
-        shares,
+        symbol, action: 'BUY', price: currentPrice, shares,
         rsi: parseFloat(rsi.toFixed(2)),
         ma10: parseFloat(ma10.toFixed(2)),
         ma20: parseFloat(ma20.toFixed(2)),
@@ -158,34 +142,43 @@ async function analyzeAndTrade(symbol, currentPrice) {
   }
 }
 
-async function startBot() {
+function startBot() {
   console.log('🤖 Trading bot starting...');
+  
+  const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
 
-  const socket = alpaca.data_stream_v2;
-
-  socket.onConnect(() => {
-    console.log('✅ Connected to Alpaca live data stream!');
-    socket.subscribeForTrades(WATCHLIST);
-    socket.subscribeForQuotes(WATCHLIST);
+  ws.on('open', () => {
+    console.log('✅ Connected to Alpaca WebSocket!');
+    ws.send(JSON.stringify({ action: 'auth', key: API_KEY, secret: SECRET_KEY }));
   });
 
-  socket.onStockTrade(async (trade) => {
-    const symbol = trade.S;
-    const price = trade.p;
-    console.log(`💹 ${symbol}: $${price}`);
-    await analyzeAndTrade(symbol, price);
+  ws.on('message', async (data) => {
+    const messages = JSON.parse(data);
+    for (const msg of messages) {
+      if (msg.T === 'success' && msg.msg === 'authenticated') {
+        console.log('✅ Authenticated! Subscribing to trades...');
+        ws.send(JSON.stringify({
+          action: 'subscribe',
+          trades: WATCHLIST,
+        }));
+      }
+      if (msg.T === 't') {
+        const symbol = msg.S;
+        const price = msg.p;
+        console.log(`💹 ${symbol}: $${price}`);
+        await analyzeAndTrade(symbol, price);
+      }
+    }
   });
 
-  socket.onError((err) => {
-    console.error('WebSocket error:', err);
+  ws.on('error', (err) => {
+    console.error('WebSocket error:', err.message);
   });
 
-  socket.onDisconnect(() => {
+  ws.on('close', () => {
     console.log('Disconnected, reconnecting in 5 seconds...');
     setTimeout(startBot, 5000);
   });
-
-  socket.connect();
 }
 
 startBot();
