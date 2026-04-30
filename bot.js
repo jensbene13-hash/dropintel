@@ -9,12 +9,19 @@ const BASE_URL = 'https://paper-api.alpaca.markets';
 const DATA_URL = 'https://data.alpaca.markets';
 
 const WATCHLIST = [
-  'AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL',
-  'TSLA', 'AMZN', 'JNJ', 'PFE', 'JPM',
-  'BAC', 'XOM', 'CVX', 'SPY', 'QQQ'
+  // Tech
+  'AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'TSLA', 'AMZN', 'AMD', 'INTC', 'CRM',
+  // Finance
+  'JPM', 'BAC', 'GS', 'MS', 'V', 'MA', 'WFC', 'C', 'AXP', 'BLK',
+  // Healthcare
+  'JNJ', 'PFE', 'UNH', 'ABBV', 'MRK', 'CVS', 'LLY', 'TMO', 'ABT', 'DHR',
+  // Energy
+  'XOM', 'CVX', 'COP', 'SLB', 'EOG', 'MPC', 'VLO', 'PSX', 'OXY', 'HAL',
+  // ETFs
+  'SPY', 'QQQ', 'DIA', 'IWM', 'VTI'
 ];
 
-const MAX_POSITIONS = 5;
+const MAX_POSITIONS = 8;
 const MAX_TRADE = 200;
 const TAKE_PROFIT_PCT = 0.01;
 const STOP_LOSS_PCT = 0.005;
@@ -129,7 +136,7 @@ async function loadAllIndicators() {
       console.log(`✅ ${symbol} | RSI: ${data.rsi.toFixed(2)} | MA10: ${data.ma10.toFixed(2)} | MA20: ${data.ma20.toFixed(2)}`);
     }
   }
-  console.log('✅ All indicators loaded! Bot is ready to trade.');
+  console.log(`✅ All indicators loaded for ${Object.keys(indicators).length} stocks!`);
 }
 
 function scheduleIndicatorRefresh() {
@@ -154,7 +161,6 @@ async function analyzeAndTrade(symbol, currentPrice) {
 
   const { ma10, ma20, rsi } = ind;
 
-  // Manage existing position
   if (positions[symbol]) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
@@ -189,20 +195,16 @@ async function analyzeAndTrade(symbol, currentPrice) {
     return;
   }
 
-  // Check if we can open a new position
   if (isOnCooldown(symbol)) return;
-  if (Object.keys(positions).length >= MAX_POSITIONS) {
-    console.log(`⚠️ Max positions (${MAX_POSITIONS}) reached, skipping ${symbol}`);
-    return;
-  }
 
-  // Buy signal
+  if (Object.keys(positions).length >= MAX_POSITIONS) return;
+
   if (ma10 > ma20 && rsi < 70) {
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
 
     isTrading = true;
-    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${rsi.toFixed(2)} | MA10: ${ma10.toFixed(2)} | MA20: ${ma20.toFixed(2)} | Positions: ${Object.keys(positions).length + 1}/${MAX_POSITIONS}`);
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${rsi.toFixed(2)} | Positions: ${Object.keys(positions).length + 1}/${MAX_POSITIONS}`);
     await placeOrder(symbol, shares, 'buy');
     positions[symbol] = { entryPrice: currentPrice, shares };
     await logTrade({
