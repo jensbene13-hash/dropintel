@@ -9,27 +9,24 @@ const BASE_URL = 'https://paper-api.alpaca.markets';
 const DATA_URL = 'https://data.alpaca.markets';
 
 const WATCHLIST = [
-  // Tech (10)
   'AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'TSLA', 'AMZN', 'AMD', 'CRM', 'INTC',
-  // Finance (6)
   'JPM', 'BAC', 'GS', 'V', 'MA', 'WFC',
-  // Healthcare (4)
   'JNJ', 'PFE', 'UNH', 'LLY',
-  // Energy (4)
   'XOM', 'CVX', 'COP', 'EOG',
-  // ETFs (6)
   'SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'XLF'
 ];
 
 const MAX_POSITIONS = 8;
 const MAX_TRADE = 200;
-const TAKE_PROFIT_PCT = 0.01;
 const STOP_LOSS_PCT = 0.005;
+const TRAILING_STOP_PCT = 0.005;
 const COOLDOWN_MS = 5 * 60 * 1000;
+const VOLUME_MULTIPLIER = 1.2;
 
 let positions = {};
 let dailyIndicators = {};
 let minuteIndicators = {};
+let volumeData = {};
 let cooldowns = {};
 let pingInterval = null;
 let isTrading = false;
@@ -49,7 +46,9 @@ async function loadExistingPositions() {
       for (const p of existing) {
         positions[p.symbol] = {
           entryPrice: parseFloat(p.avg_entry_price),
-          shares: parseFloat(p.qty)
+          shares: parseFloat(p.qty),
+          highestPrice: parseFloat(p.current_price || p.avg_entry_price),
+          trailingStop: parseFloat(p.avg_entry_price) * (1 - TRAILING_STOP_PCT),
         };
         console.log(`📋 Loaded existing position: ${p.symbol} | ${p.qty} shares @ $${p.avg_entry_price}`);
       }
@@ -125,7 +124,13 @@ async function loadDailyIndicators(symbol) {
     const bars = data.bars || [];
     if (bars.length < 20) return null;
     const closes = bars.map(b => b.c);
-    return calculateIndicators(closes);
+    const volumes = bars.map(b => b.v);
+    const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    const indicators = calculateIndicators(closes);
+    if (indicators) {
+      volumeData[symbol] = { avgVolume };
+    }
+    return indicators;
   } catch (e) {
     return null;
   }
@@ -146,7 +151,14 @@ async function loadMinuteIndicators(symbol) {
     const bars = data.bars || [];
     if (bars.length < 20) return null;
     const closes = bars.map(b => b.c);
-    return calculateIndicators(closes);
+    const volumes = bars.map(b => b.v);
+    const currentVolume = volumes.slice(-5).reduce((a, b) => a + b, 0) / 5;
+    const indicators = calculateIndicators(closes);
+    if (indicators) {
+      if (!volumeData[symbol]) volumeData[symbol] = {};
+      volumeData[symbol].currentVolume = currentVolume;
+    }
+    return indicators;
   } catch (e) {
     return null;
   }
@@ -185,6 +197,12 @@ function isOnCooldown(symbol) {
   return Date.now() - cooldowns[symbol] < COOLDOWN_MS;
 }
 
+function hasVolumeConfirmation(symbol) {
+  const vol = volumeData[symbol];
+  if (!vol || !vol.avgVolume || !vol.currentVolume) return true;
+  return vol.currentVolume >= vol.avgVolume * VOLUME_MULTIPLIER;
+}
+
 async function analyzeAndTrade(symbol, currentPrice) {
   if (isTrading) return;
 
@@ -201,9 +219,17 @@ async function analyzeAndTrade(symbol, currentPrice) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
 
-    if (pnlPct >= TAKE_PROFIT_PCT) {
+    // Update trailing stop if price moved higher
+    if (currentPrice > position.highestPrice) {
+      position.highestPrice = currentPrice;
+      position.trailingStop = currentPrice * (1 - TRAILING_STOP_PCT);
+      console.log(`📊 ${symbol} new high $${currentPrice} | Trailing stop: $${position.trailingStop.toFixed(2)}`);
+    }
+
+    // Check trailing stop
+    if (currentPrice <= position.trailingStop && pnlPct > 0) {
       isTrading = true;
-      console.log(`🟢 TAKE PROFIT: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
+      console.log(`🟢 TRAILING STOP: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
       await placeOrder(symbol, position.shares, 'sell');
       await logTrade({
         symbol, action: 'SELL', price: currentPrice,
@@ -213,7 +239,11 @@ async function analyzeAndTrade(symbol, currentPrice) {
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
       isTrading = false;
-    } else if (pnlPct <= -STOP_LOSS_PCT) {
+      return;
+    }
+
+    // Hard stop loss
+    if (pnlPct <= -STOP_LOSS_PCT) {
       isTrading = true;
       console.log(`🔴 STOP LOSS: Selling ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
       await placeOrder(symbol, position.shares, 'sell');
@@ -232,14 +262,21 @@ async function analyzeAndTrade(symbol, currentPrice) {
   if (isOnCooldown(symbol)) return;
   if (Object.keys(positions).length >= MAX_POSITIONS) return;
 
-  if (dailyBullish && dailyRSIOk && minuteBullish && minuteRSIOk) {
+  const volumeOk = hasVolumeConfirmation(symbol);
+
+  if (dailyBullish && dailyRSIOk && minuteBullish && minuteRSIOk && volumeOk) {
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
 
     isTrading = true;
-    console.log(`📈 BUY: ${symbol} at $${currentPrice} | Daily RSI: ${daily.rsi.toFixed(2)} | Minute RSI: ${minute ? minute.rsi.toFixed(2) : 'N/A'} | Positions: ${Object.keys(positions).length + 1}/${MAX_POSITIONS}`);
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | Daily RSI: ${daily.rsi.toFixed(2)} | Minute RSI: ${minute ? minute.rsi.toFixed(2) : 'N/A'} | Volume: ✅ | Positions: ${Object.keys(positions).length + 1}/${MAX_POSITIONS}`);
     await placeOrder(symbol, shares, 'buy');
-    positions[symbol] = { entryPrice: currentPrice, shares };
+    positions[symbol] = {
+      entryPrice: currentPrice,
+      shares,
+      highestPrice: currentPrice,
+      trailingStop: currentPrice * (1 - TRAILING_STOP_PCT),
+    };
     await logTrade({
       symbol, action: 'BUY', price: currentPrice, shares,
       rsi: parseFloat(daily.rsi.toFixed(2)),
@@ -251,7 +288,7 @@ async function analyzeAndTrade(symbol, currentPrice) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot starting with multi-timeframe analysis...');
+  console.log('🤖 Trading bot starting with volume confirmation + trailing stops...');
   isSubscribed = false;
 
   const ws = new WebSocket('wss://stream.data.alpaca.markets/v2/iex');
@@ -269,7 +306,6 @@ function startBot() {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
         if (!isSubscribed) {
-          console.log('🔄 Resubscribing...');
           ws.send(JSON.stringify({
             action: 'subscribe',
             trades: WATCHLIST,
@@ -292,7 +328,7 @@ function startBot() {
 
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Bot is now trading live!');
+        console.log('✅ Subscribed! Bot is now trading live with volume + trailing stops!');
       }
 
       if (msg.T === 'error') {
