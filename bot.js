@@ -40,20 +40,10 @@ function getMarketSession() {
   const utcMinute = now.getUTCMinutes();
   const utcTime = utcHour * 60 + utcMinute;
   const day = now.getUTCDay();
-
-  // Weekend — no trading
   if (day === 0 || day === 6) return 'closed';
-
-  // 9:30 AM - 4:00 PM EST = 14:30 - 21:00 UTC
   if (utcTime >= 870 && utcTime < 1260) return 'market';
-
-  // 4:00 PM - 8:00 PM EST = 21:00 - 01:00 UTC
   if (utcTime >= 1260 && utcTime < 1440) return 'after_hours';
-
-  // 4:00 AM - 9:30 AM EST = 09:00 - 14:30 UTC
   if (utcTime >= 540 && utcTime < 870) return 'pre_market';
-
-  // Overnight — no new buys
   return 'overnight';
 }
 
@@ -68,12 +58,6 @@ function getVolumeMultiplier() {
   const session = getMarketSession();
   if (session === 'market') return VOLUME_MULTIPLIER;
   return EXTENDED_VOLUME_MULTIPLIER;
-}
-
-function getTimeInForce() {
-  const session = getMarketSession();
-  if (session === 'market') return 'day';
-  return 'day';
 }
 
 async function loadExistingPositions() {
@@ -121,6 +105,14 @@ async function logTrade(trade) {
 }
 
 async function placeOrder(symbol, qty, side, extendedHours = false) {
+  const body = {
+    symbol,
+    qty,
+    side,
+    type: extendedHours ? 'limit' : 'market',
+    time_in_force: 'day',
+    extended_hours: extendedHours,
+  };
   const res = await fetch(`${BASE_URL}/v2/orders`, {
     method: 'POST',
     headers: {
@@ -128,21 +120,50 @@ async function placeOrder(symbol, qty, side, extendedHours = false) {
       'APCA-API-SECRET-KEY': SECRET_KEY,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      symbol,
-      qty,
-      side,
-      type: extendedHours ? 'limit' : 'market',
-      time_in_force: extendedHours ? 'day' : 'day',
-      extended_hours: extendedHours,
-      ...(extendedHours && side === 'buy' ? { limit_price: null } : {}),
-    })
+    body: JSON.stringify(body)
   });
   return res.json();
 }
 
+// Calculate EMA (Exponential Moving Average)
+function calculateEMA(prices, period) {
+  if (prices.length < period) return null;
+  const k = 2 / (period + 1);
+  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < prices.length; i++) {
+    ema = prices[i] * k + ema * (1 - k);
+  }
+  return ema;
+}
+
+// Calculate MACD
+function calculateMACD(closes) {
+  if (closes.length < 26) return null;
+  const ema12 = calculateEMA(closes, 12);
+  const ema26 = calculateEMA(closes, 26);
+  if (!ema12 || !ema26) return null;
+  const macdLine = ema12 - ema26;
+
+  // Signal line = 9 period EMA of MACD
+  const macdValues = [];
+  for (let i = 26; i <= closes.length; i++) {
+    const e12 = calculateEMA(closes.slice(0, i), 12);
+    const e26 = calculateEMA(closes.slice(0, i), 26);
+    if (e12 && e26) macdValues.push(e12 - e26);
+  }
+  const signalLine = calculateEMA(macdValues, 9);
+  const histogram = macdLine - (signalLine || 0);
+
+  return {
+    macd: macdLine,
+    signal: signalLine,
+    histogram,
+    bullish: macdLine > signalLine && histogram > 0,
+  };
+}
+
 function calculateIndicators(closes) {
-  if (closes.length < 20) return null;
+  if (closes.length < 26) return null;
   const ma10 = closes.slice(-10).reduce((a, b) => a + b, 0) / 10;
   const ma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
   const changes = closes.slice(-15).map((c, i, arr) => i === 0 ? 0 : c - arr[i - 1]);
@@ -152,7 +173,8 @@ function calculateIndicators(closes) {
   const avgLoss = losses.reduce((a, b) => a + b, 0) / 14;
   const rs = avgGain / (avgLoss || 1);
   const rsi = 100 - (100 / (1 + rs));
-  return { ma10, ma20, rsi };
+  const macd = calculateMACD(closes);
+  return { ma10, ma20, rsi, macd };
 }
 
 async function loadDailyIndicators(symbol) {
@@ -168,7 +190,7 @@ async function loadDailyIndicators(symbol) {
     );
     const data = await res.json();
     const bars = data.bars || [];
-    if (bars.length < 20) return null;
+    if (bars.length < 26) return null;
     const closes = bars.map(b => b.c);
     const volumes = bars.map(b => b.v);
     const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
@@ -183,7 +205,7 @@ async function loadDailyIndicators(symbol) {
 async function loadMinuteIndicators(symbol) {
   try {
     const res = await fetch(
-      `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Min&limit=50`,
+      `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Min&limit=60`,
       {
         headers: {
           'APCA-API-KEY-ID': API_KEY,
@@ -193,7 +215,7 @@ async function loadMinuteIndicators(symbol) {
     );
     const data = await res.json();
     const bars = data.bars || [];
-    if (bars.length < 20) return null;
+    if (bars.length < 26) return null;
     const closes = bars.map(b => b.c);
     const volumes = bars.map(b => b.v);
     const currentVolume = volumes.slice(-5).reduce((a, b) => a + b, 0) / 5;
@@ -257,10 +279,13 @@ async function analyzeAndTrade(symbol, currentPrice) {
 
   const dailyBullish = daily.ma10 > daily.ma20;
   const dailyRSIOk = daily.rsi < 70 && daily.rsi > 30;
+  const dailyMACDBullish = daily.macd ? daily.macd.bullish : true;
+
   const minuteBullish = minute ? minute.ma10 > minute.ma20 : true;
   const minuteRSIOk = minute ? minute.rsi < 70 : true;
+  const minuteMACDBullish = minute?.macd ? minute.macd.bullish : true;
 
-  // Always manage existing positions regardless of session
+  // Always manage existing positions
   if (positions[symbol]) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
@@ -302,25 +327,22 @@ async function analyzeAndTrade(symbol, currentPrice) {
     return;
   }
 
-  // No new buys overnight or on weekends
   const maxPositions = getMaxPositions();
   if (maxPositions === 0) return;
-
   if (isOnCooldown(symbol)) return;
   if (Object.keys(positions).length >= maxPositions) return;
 
   const volumeOk = hasVolumeConfirmation(symbol);
-
-  // Stricter RSI requirements for extended hours
   const rsiLimit = session === 'market' ? 70 : 65;
   const strictDailyRSIOk = daily.rsi < rsiLimit && daily.rsi > 30;
 
-  if (dailyBullish && strictDailyRSIOk && minuteBullish && minuteRSIOk && volumeOk) {
+  // All 4 signals must agree: MA + RSI + MACD + Volume
+  if (dailyBullish && strictDailyRSIOk && dailyMACDBullish && minuteBullish && minuteRSIOk && minuteMACDBullish && volumeOk) {
     const shares = Math.floor(MAX_TRADE / currentPrice);
     if (shares < 1) return;
 
     isTrading = true;
-    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${daily.rsi.toFixed(2)} | Session: ${session} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
+    console.log(`📈 BUY: ${symbol} at $${currentPrice} | RSI: ${daily.rsi.toFixed(2)} | MACD: ${daily.macd ? daily.macd.histogram.toFixed(4) : 'N/A'} | Session: ${session} | Positions: ${Object.keys(positions).length + 1}/${maxPositions}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -333,13 +355,14 @@ async function analyzeAndTrade(symbol, currentPrice) {
       rsi: parseFloat(daily.rsi.toFixed(2)),
       ma10: parseFloat(daily.ma10.toFixed(2)),
       ma20: parseFloat(daily.ma20.toFixed(2)),
+      score: daily.macd ? parseFloat(daily.macd.histogram.toFixed(4)) : 0,
     });
     isTrading = false;
   }
 }
 
 function startBot() {
-  console.log('🤖 Trading bot starting — 24/7 with smart session management...');
+  console.log('🤖 Trading bot starting — 24/7 with MACD + Volume + Trailing Stops...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -382,7 +405,7 @@ function startBot() {
 
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Bot is now trading 24/7 with smart session management!');
+        console.log('✅ Subscribed! Bot running with MA + RSI + MACD + Volume + Trailing Stops!');
       }
 
       if (msg.T === 'error') {
