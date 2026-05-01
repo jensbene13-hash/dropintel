@@ -48,14 +48,15 @@ const MAX_PRICE_HISTORY = 100;
 const MIN_TRAILING_STOP = 0.003;
 const MAX_TRAILING_STOP = 0.015;
 const REGIME_STABILITY_THRESHOLD = 30;
-const MIN_PROFIT_TO_TRAIL = 0.002; // 0.2% min profit before trailing stop activates
-const AVOID_RESET_HOURS = 24; // Reset avoid list every 24 hours
+const MIN_PROFIT_TO_TRAIL = 0.002;
+const AVOID_RESET_HOURS = 24;
+const AVOID_LOSS_THRESHOLD = 5; // Raised from 3 to 5
 
 let botParams = {
   maxRSI: 65,
   minRSI: 35,
   avoidSymbols: [],
-  avoidTimestamps: {}, // Track when each symbol was added to avoid list
+  avoidTimestamps: {},
   preferredSymbols: [],
   bestHours: [],
   bestSectors: [],
@@ -66,7 +67,7 @@ let currentRegime = 'neutral';
 let volatilityData = {};
 let regimeCandidateCount = 0;
 let regimeCandidate = 'neutral';
-let tradingLocks = {}; // Per-symbol locks instead of global
+let tradingLocks = {};
 
 const SECTOR_MAP = {
   'AAPL': 'tech', 'NVDA': 'tech', 'MSFT': 'tech', 'META': 'tech', 'GOOGL': 'tech',
@@ -89,14 +90,10 @@ let cooldowns = {};
 let pingInterval = null;
 let isSubscribed = false;
 
-// #4 — Per symbol trading lock
-function isSymbolLocked(symbol) {
-  return tradingLocks[symbol] === true;
-}
+function isSymbolLocked(symbol) { return tradingLocks[symbol] === true; }
 function lockSymbol(symbol) { tradingLocks[symbol] = true; }
 function unlockSymbol(symbol) { tradingLocks[symbol] = false; }
 
-// #5 — Reset avoid list every 24 hours
 function refreshAvoidList() {
   const now = Date.now();
   const resetMs = AVOID_RESET_HOURS * 60 * 60 * 1000;
@@ -255,13 +252,11 @@ function getPositionSize(indicators, isPreferred, newsSentiment) {
   return 100;
 }
 
-// #3 — Signal strength scorer for ranking
 function getFullSignalScore(symbol) {
   const indicators = realtimeIndicators[symbol] || dailyIndicators[symbol];
   const daily = dailyIndicators[symbol];
   const news = getNewsSentiment(symbol);
   if (!indicators) return 0;
-
   let score = 0;
   if (indicators.ma10 > indicators.ma20) score += 2;
   if (daily && daily.ma10 > daily.ma20) score += 2;
@@ -314,10 +309,8 @@ async function closePosition(symbol, reason) {
   }
 }
 
-// #1 — Update BUY record outcome instead of creating new SELL record
 async function updateTradeOutcome(symbol, outcome, profitLoss) {
   try {
-    // Find the most recent BUY trade for this symbol with no outcome
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/trades?symbol=eq.${symbol}&action=eq.BUY&outcome=is.null&order=created_at.desc&limit=1`,
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
@@ -344,9 +337,7 @@ async function updateTradeOutcome(symbol, outcome, profitLoss) {
 
 async function loadLearnings() {
   try {
-    // #5 — Check and reset expired avoid symbols
     refreshAvoidList();
-
     console.log('🧠 Loading learnings from Supabase...');
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/learnings?order=created_at.desc&limit=1`,
@@ -364,9 +355,8 @@ async function loadLearnings() {
     } else {
       console.log('📊 No learnings yet — using default parameters');
     }
-
     const tradesRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/trades?outcome=eq.LOSS&order=created_at.desc&limit=30`,
+      `${SUPABASE_URL}/rest/v1/trades?outcome=eq.LOSS&order=created_at.desc&limit=50`,
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
     );
     const lossTrades = await tradesRes.json();
@@ -374,16 +364,14 @@ async function loadLearnings() {
       const lossCounts = {};
       lossTrades.forEach(t => { lossCounts[t.symbol] = (lossCounts[t.symbol] || 0) + 1; });
       const newAvoidSymbols = Object.entries(lossCounts)
-        .filter(([_, count]) => count >= 3)
+        .filter(([_, count]) => count >= AVOID_LOSS_THRESHOLD)
         .map(([symbol]) => symbol);
-
       for (const symbol of newAvoidSymbols) {
         if (!botParams.avoidSymbols.includes(symbol)) {
           botParams.avoidTimestamps[symbol] = Date.now();
-          await closePosition(symbol, '3+ losses');
+          await closePosition(symbol, `${AVOID_LOSS_THRESHOLD}+ losses`);
         }
       }
-
       botParams.avoidSymbols = newAvoidSymbols;
       if (botParams.avoidSymbols.length > 0) {
         console.log(`⚠️ Avoiding: ${botParams.avoidSymbols.join(', ')}`);
@@ -396,7 +384,6 @@ async function loadLearnings() {
 
 async function runLearningAnalysis() {
   try {
-    // #1 — Query trades with outcomes (updated BUY records)
     const tradesRes = await fetch(
       `${SUPABASE_URL}/rest/v1/trades?outcome=not.is.null&action=eq.BUY&select=*`,
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
@@ -660,7 +647,6 @@ function scheduleRefresh() {
     await refreshNewsData();
   }, 30 * 60 * 1000);
 
-  // Check avoid list reset every hour
   setInterval(() => {
     refreshAvoidList();
   }, 60 * 60 * 1000);
@@ -703,18 +689,14 @@ async function manageShortPosition(symbol, currentPrice, session) {
   const position = shortPositions[symbol];
   if (!position) return;
   if (isSymbolLocked(symbol)) return;
-
   const newTrailingStopPct = getDynamicTrailingStop(symbol);
   position.trailingStopPct = newTrailingStopPct;
   const pnlPct = (position.entryPrice - currentPrice) / position.entryPrice;
-
   if (currentPrice < position.lowestPrice) {
     position.lowestPrice = currentPrice;
     position.trailingStop = currentPrice * (1 + position.trailingStopPct);
     console.log(`📊 SHORT ${symbol} new low $${currentPrice} | Stop: $${position.trailingStop.toFixed(2)} (${(position.trailingStopPct*100).toFixed(2)}%)`);
   }
-
-  // #2 — Only trail after MIN_PROFIT_TO_TRAIL
   if (currentPrice >= position.trailingStop && pnlPct >= MIN_PROFIT_TO_TRAIL) {
     lockSymbol(symbol);
     console.log(`🟢 SHORT COVER: ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
@@ -726,7 +708,6 @@ async function manageShortPosition(symbol, currentPrice, session) {
     setTimeout(runLearningAnalysis, 2000);
     return;
   }
-
   if (pnlPct <= -STOP_LOSS_PCT) {
     lockSymbol(symbol);
     console.log(`🔴 SHORT STOP LOSS: ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
@@ -768,14 +749,12 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
     if (currentPrice > position.highestPrice) {
       position.highestPrice = currentPrice;
-      // #2 — Only move trailing stop if we have MIN_PROFIT_TO_TRAIL
       if (pnlPct >= MIN_PROFIT_TO_TRAIL) {
         position.trailingStop = currentPrice * (1 - position.trailingStopPct);
         console.log(`📊 ${symbol} new high $${currentPrice} | Stop: $${position.trailingStop.toFixed(2)} (${(position.trailingStopPct*100).toFixed(2)}%)`);
       }
     }
 
-    // #2 — Only trigger trailing stop if profit threshold met
     if (currentPrice <= position.trailingStop && pnlPct >= MIN_PROFIT_TO_TRAIL) {
       lockSymbol(symbol);
       console.log(`🟢 TRAILING STOP: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
@@ -806,16 +785,18 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (isOnCooldown(symbol)) return;
 
   const totalPositions = Object.keys(positions).length + Object.keys(shortPositions).length;
-  const adjustedMax = currentRegime === 'neutral' ? Math.floor(maxPositions * 0.6) : maxPositions;
+
+  // Don't trade in neutral market — wait for clear direction
+  if (currentRegime === 'neutral') return;
+
+  const adjustedMax = maxPositions;
   if (totalPositions >= adjustedMax) return;
 
   const momentum = getMomentum(symbol);
   const signalScore = getSignalScore(indicators, daily);
   const bearishScore = getBearishScore(indicators, daily);
 
-  // #3 — Only buy if this symbol is the highest ranked qualifying signal
   if (currentRegime !== 'bear' && signalScore >= 4 && momentum > 0) {
-    // Rank all qualifying symbols and only buy if this is top ranked
     const qualifyingSymbols = WATCHLIST.filter(s => {
       if (botParams.avoidSymbols.includes(s)) return false;
       if (positions[s] || shortPositions[s]) return false;
@@ -831,10 +812,8 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
       .map(s => ({ symbol: s, score: getFullSignalScore(s) }))
       .sort((a, b) => b.score - a.score);
 
-    // Only proceed if this symbol is in top (adjustedMax - totalPositions) spots
     const slotsAvailable = adjustedMax - totalPositions;
     const topSymbols = ranked.slice(0, slotsAvailable).map(r => r.symbol);
-
     if (!topSymbols.includes(symbol)) return;
 
     const isPreferred = botParams.preferredSymbols.includes(symbol);
@@ -899,7 +878,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — All 5 Upgrades | Smart Learning | Ranked Signals...');
+  console.log('🤖 Trading bot — No Neutral Trading | 5-Loss Avoid | All Upgrades...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -937,7 +916,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! All 5 upgrades active — ranked signals, smart learning, auto-close, per-symbol locks, 24hr reset!');
+        console.log('✅ Subscribed! No neutral trading | 5-loss avoid threshold | All upgrades active!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
