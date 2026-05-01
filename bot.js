@@ -42,14 +42,15 @@ const POSITIVE_KEYWORDS = [
 
 const MAX_POSITIONS_MARKET = 8;
 const MAX_POSITIONS_EXTENDED = 3;
-const STOP_LOSS_PCT = 0.003; // Tightened to 0.3%
-const COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes
+const STOP_LOSS_PCT = 0.003;
+const COOLDOWN_MS = 3 * 60 * 1000;
 const MAX_PRICE_HISTORY = 100;
 const MIN_TRAILING_STOP = 0.003;
 const MAX_TRAILING_STOP = 0.015;
+const REGIME_STABILITY_THRESHOLD = 15; // Must see 15 consecutive ticks before changing regime
 
 let botParams = {
-  maxRSI: 65, // Tightened RSI range
+  maxRSI: 65,
   minRSI: 35,
   avoidSymbols: [],
   preferredSymbols: [],
@@ -60,6 +61,10 @@ let botParams = {
 let newsData = {};
 let currentRegime = 'neutral';
 let volatilityData = {};
+
+// Regime stability tracking
+let regimeCandidateCount = 0;
+let regimeCandidate = 'neutral';
 
 const SECTOR_MAP = {
   'AAPL': 'tech', 'NVDA': 'tech', 'MSFT': 'tech', 'META': 'tech', 'GOOGL': 'tech',
@@ -104,8 +109,10 @@ function getMarketRegime() {
   const spy = realtimeIndicators['SPY'] || dailyIndicators['SPY'];
   const qqq = realtimeIndicators['QQQ'] || dailyIndicators['QQQ'];
   if (!spy) return 'neutral';
+
   const spyMomentum = getMomentum('SPY');
   const qqqMomentum = getMomentum('QQQ');
+
   const bullSignals = [
     spy.ma10 > spy.ma20,
     qqq ? qqq.ma10 > qqq.ma20 : false,
@@ -113,6 +120,7 @@ function getMarketRegime() {
     qqqMomentum > 0,
     spy.rsi > 45 && spy.rsi < 75,
   ].filter(Boolean).length;
+
   const bearSignals = [
     spy.ma10 < spy.ma20,
     qqq ? qqq.ma10 < qqq.ma20 : false,
@@ -120,17 +128,40 @@ function getMarketRegime() {
     qqqMomentum < 0,
     spy.rsi < 45,
   ].filter(Boolean).length;
+
   if (bullSignals >= 3) return 'bull';
   if (bearSignals >= 3) return 'bear';
   return 'neutral';
 }
 
 function updateRegime() {
-  const newRegime = getMarketRegime();
-  if (newRegime !== currentRegime) {
-    console.log(`🌍 Market regime changed: ${currentRegime} → ${newRegime}`);
-    currentRegime = newRegime;
+  const detectedRegime = getMarketRegime();
+
+  // If same as current, no change needed
+  if (detectedRegime === currentRegime) {
+    regimeCandidateCount = 0;
+    regimeCandidate = currentRegime;
+    return currentRegime;
   }
+
+  // If different, start counting
+  if (detectedRegime === regimeCandidate) {
+    regimeCandidateCount++;
+  } else {
+    // New candidate — reset counter
+    regimeCandidate = detectedRegime;
+    regimeCandidateCount = 1;
+  }
+
+  // Only change regime after REGIME_STABILITY_THRESHOLD consecutive ticks
+  if (regimeCandidateCount >= REGIME_STABILITY_THRESHOLD) {
+    if (regimeCandidate !== currentRegime) {
+      console.log(`🌍 Market regime confirmed: ${currentRegime} → ${regimeCandidate} (stable for ${REGIME_STABILITY_THRESHOLD} ticks)`);
+      currentRegime = regimeCandidate;
+      regimeCandidateCount = 0;
+    }
+  }
+
   return currentRegime;
 }
 
@@ -228,7 +259,6 @@ async function loadLearnings() {
     const data = await res.json();
     if (data && data.length > 0) {
       const learning = data[0];
-      // Keep RSI tight — don't let learning loosen it too much
       botParams.maxRSI = Math.min(parseFloat(learning.recommended_max_rsi) || 65, 65);
       botParams.minRSI = 35;
       if (learning.best_symbol) botParams.preferredSymbols = [learning.best_symbol];
@@ -539,7 +569,6 @@ function getSignalScore(indicators, daily) {
   if (indicators.ma10 > indicators.ma20) score++;
   if (daily && daily.ma10 > daily.ma20) score++;
   if (indicators.rsi >= botParams.minRSI && indicators.rsi <= botParams.maxRSI) score++;
-  // MACD must be positive — no weak signals
   if (indicators.macd?.bullish && indicators.macd?.histogram > 0) score++;
   if (daily?.macd?.bullish && daily?.macd?.histogram > 0) score++;
   return score;
@@ -681,7 +710,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
   const trailingStopPct = getDynamicTrailingStop(symbol);
 
-  // LONG — requires 4/5 signals + positive momentum
   if (currentRegime !== 'bear' && signalScore >= 4 && momentum > 0) {
     isTrading = true;
     const regimeIcon = currentRegime === 'bull' ? '🐂' : '➡️';
@@ -706,7 +734,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     return;
   }
 
-  // SHORT — requires 4/5 bearish signals + negative momentum
   if (currentRegime !== 'bull' && bearishScore >= 4 && momentum < 0) {
     isTrading = true;
     const regimeIcon = currentRegime === 'bear' ? '🐻' : '➡️';
@@ -731,7 +758,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — 65% Win Rate Target | Tighter Signals | Dynamic Stops...');
+  console.log('🤖 Trading bot — Stable Regime + 65% Win Rate Target + Dynamic Stops...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -769,7 +796,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Targeting 65% win rate — quality over quantity!');
+        console.log('✅ Subscribed! Stable regime bot targeting 65% win rate!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
