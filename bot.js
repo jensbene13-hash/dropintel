@@ -104,7 +104,6 @@ function getDynamicTrailingStop(symbol) {
 }
 
 function getLongMomentum(symbol) {
-  // Use last 20 ticks for more stable momentum reading
   const prices = realtimePrices[symbol];
   if (!prices || prices.length < 20) return 0;
   const recent = prices.slice(-20);
@@ -112,7 +111,6 @@ function getLongMomentum(symbol) {
 }
 
 function getMomentum(symbol) {
-  // Short momentum for trade entries
   const prices = realtimePrices[symbol];
   if (!prices || prices.length < 5) return 0;
   const recent = prices.slice(-5);
@@ -123,11 +121,8 @@ function getMarketRegime() {
   const spy = realtimeIndicators['SPY'] || dailyIndicators['SPY'];
   const qqq = realtimeIndicators['QQQ'] || dailyIndicators['QQQ'];
   if (!spy) return 'neutral';
-
-  // Use long momentum for regime detection
   const spyMomentum = getLongMomentum('SPY');
   const qqqMomentum = getLongMomentum('QQQ');
-
   const bullSignals = [
     spy.ma10 > spy.ma20,
     qqq ? qqq.ma10 > qqq.ma20 : false,
@@ -135,7 +130,6 @@ function getMarketRegime() {
     qqqMomentum > 0,
     spy.rsi > 45 && spy.rsi < 75,
   ].filter(Boolean).length;
-
   const bearSignals = [
     spy.ma10 < spy.ma20,
     qqq ? qqq.ma10 < qqq.ma20 : false,
@@ -143,8 +137,6 @@ function getMarketRegime() {
     qqqMomentum < 0,
     spy.rsi < 45,
   ].filter(Boolean).length;
-
-  // Need 4/5 signals now instead of 3/5 for more stability
   if (bullSignals >= 4) return 'bull';
   if (bearSignals >= 4) return 'bear';
   return 'neutral';
@@ -152,20 +144,17 @@ function getMarketRegime() {
 
 function updateRegime() {
   const detectedRegime = getMarketRegime();
-
   if (detectedRegime === currentRegime) {
     regimeCandidateCount = 0;
     regimeCandidate = currentRegime;
     return currentRegime;
   }
-
   if (detectedRegime === regimeCandidate) {
     regimeCandidateCount++;
   } else {
     regimeCandidate = detectedRegime;
     regimeCandidateCount = 1;
   }
-
   if (regimeCandidateCount >= REGIME_STABILITY_THRESHOLD) {
     if (regimeCandidate !== currentRegime) {
       console.log(`🌍 Market regime confirmed: ${currentRegime} → ${regimeCandidate}`);
@@ -173,7 +162,6 @@ function updateRegime() {
       regimeCandidateCount = 0;
     }
   }
-
   return currentRegime;
 }
 
@@ -254,6 +242,41 @@ function updateRealtimeData(symbol, price, size) {
   }
 }
 
+async function closePosition(symbol, reason) {
+  try {
+    if (positions[symbol]) {
+      console.log(`🚪 Auto-closing LONG ${symbol} — reason: ${reason}`);
+      const pos = positions[symbol];
+      await placeOrder(symbol, pos.shares, 'sell');
+      await logTrade({
+        symbol, action: 'SELL',
+        price: pos.entryPrice,
+        shares: pos.shares,
+        outcome: 'LOSS',
+        profit_loss: '0',
+      });
+      delete positions[symbol];
+      cooldowns[symbol] = Date.now();
+    }
+    if (shortPositions[symbol]) {
+      console.log(`🚪 Auto-closing SHORT ${symbol} — reason: ${reason}`);
+      const pos = shortPositions[symbol];
+      await placeOrder(symbol, pos.shares, 'buy');
+      await logTrade({
+        symbol, action: 'SHORT_COVER',
+        price: pos.entryPrice,
+        shares: pos.shares,
+        outcome: 'LOSS',
+        profit_loss: '0',
+      });
+      delete shortPositions[symbol];
+      cooldowns[symbol] = Date.now();
+    }
+  } catch (e) {
+    console.error(`Failed to close ${symbol}:`, e.message);
+  }
+}
+
 async function loadLearnings() {
   try {
     console.log('🧠 Loading learnings from Supabase...');
@@ -273,6 +296,7 @@ async function loadLearnings() {
     } else {
       console.log('📊 No learnings yet — using default parameters');
     }
+
     const tradesRes = await fetch(
       `${SUPABASE_URL}/rest/v1/trades?outcome=eq.LOSS&order=created_at.desc&limit=30`,
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
@@ -281,9 +305,18 @@ async function loadLearnings() {
     if (Array.isArray(lossTrades) && lossTrades.length > 0) {
       const lossCounts = {};
       lossTrades.forEach(t => { lossCounts[t.symbol] = (lossCounts[t.symbol] || 0) + 1; });
-      botParams.avoidSymbols = Object.entries(lossCounts)
+      const newAvoidSymbols = Object.entries(lossCounts)
         .filter(([_, count]) => count >= 3)
         .map(([symbol]) => symbol);
+
+      // Auto close any existing positions in newly avoided symbols
+      for (const symbol of newAvoidSymbols) {
+        if (!botParams.avoidSymbols.includes(symbol)) {
+          await closePosition(symbol, '3+ losses');
+        }
+      }
+
+      botParams.avoidSymbols = newAvoidSymbols;
       if (botParams.avoidSymbols.length > 0) {
         console.log(`⚠️ Avoiding: ${botParams.avoidSymbols.join(', ')}`);
       }
@@ -366,7 +399,7 @@ async function runLearningAnalysis() {
     if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
     if (bestHours.length > 0) botParams.bestHours = bestHours;
     if (bestSectors.length > 0) botParams.bestSectors = bestSectors;
-    console.log(`✅ Learning: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol} | Hours: ${bestHours.join(',')} | Sectors: ${bestSectors.join(',')}`);
+    console.log(`✅ Learning: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol}`);
   } catch (e) {
     console.error('Learning failed:', e.message);
   }
@@ -766,7 +799,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Stable Regime + 65% Win Rate + Dynamic Stops...');
+  console.log('🤖 Trading bot — Auto-Close + Stable Regime + 65% Win Rate Target...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -804,7 +837,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Stable regime bot is live!');
+        console.log('✅ Subscribed! Auto-close bot is now live!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
