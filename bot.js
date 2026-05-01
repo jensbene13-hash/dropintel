@@ -50,7 +50,8 @@ const MAX_TRAILING_STOP = 0.015;
 const REGIME_STABILITY_THRESHOLD = 30;
 const MIN_PROFIT_TO_TRAIL = 0.002;
 const AVOID_RESET_HOURS = 24;
-const AVOID_LOSS_THRESHOLD = 5; // Raised from 3 to 5
+const AVOID_LOSS_THRESHOLD = 5;
+const SINGLETON_LEARNING_ID = 'dropintel-main';
 
 let botParams = {
   maxRSI: 65,
@@ -292,7 +293,7 @@ async function closePosition(symbol, reason) {
       console.log(`🚪 Auto-closing LONG ${symbol} — reason: ${reason}`);
       const pos = positions[symbol];
       await placeOrder(symbol, pos.shares, 'sell');
-      await updateTradeOutcome(symbol, 'LOSS', ((pos.entryPrice - pos.entryPrice) * pos.shares).toFixed(2));
+      await updateTradeOutcome(symbol, 'LOSS', '0');
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
     }
@@ -432,30 +433,57 @@ async function runLearningAnalysis() {
       .sort((a, b) => (b[1].wins / (b[1].wins + b[1].losses)) - (a[1].wins / (a[1].wins + a[1].losses)))
       .slice(0, 2)
       .map(([sector]) => sector);
-    await fetch(`${SUPABASE_URL}/rest/v1/learnings`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Prefer': 'return=minimal'
-      },
-      body: JSON.stringify({
-        win_rate: parseFloat(winRate),
-        avg_win_rsi: avgWinRSI.toFixed(2),
-        avg_loss_rsi: losses.length > 0 ? (losses.map(t => parseFloat(t.rsi)).filter(Boolean).reduce((a, b) => a + b, 0) / losses.length).toFixed(2) : null,
-        recommended_max_rsi: recommendedMaxRSI.toFixed(2),
-        best_symbol: bestSymbol || null,
-        best_hours: JSON.stringify(bestHours),
-        best_sectors: JSON.stringify(bestSectors),
-        total_trades: trades.length,
-      })
-    });
+
+    const learningData = {
+      win_rate: parseFloat(winRate),
+      avg_win_rsi: avgWinRSI.toFixed(2),
+      avg_loss_rsi: losses.length > 0 ? (losses.map(t => parseFloat(t.rsi)).filter(Boolean).reduce((a, b) => a + b, 0) / losses.length).toFixed(2) : null,
+      recommended_max_rsi: recommendedMaxRSI.toFixed(2),
+      best_symbol: bestSymbol || null,
+      best_hours: JSON.stringify(bestHours),
+      best_sectors: JSON.stringify(bestSectors),
+      total_trades: trades.length,
+    };
+
+    // Check if singleton record exists
+    const existingRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/learnings?limit=1`,
+      { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+    );
+    const existing = await existingRes.json();
+
+    if (existing && existing.length > 0) {
+      // UPDATE existing record
+      await fetch(`${SUPABASE_URL}/rest/v1/learnings?id=eq.${existing[0].id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(learningData)
+      });
+      console.log(`✅ Learning UPDATED: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol}`);
+    } else {
+      // INSERT first record
+      await fetch(`${SUPABASE_URL}/rest/v1/learnings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(learningData)
+      });
+      console.log(`✅ Learning CREATED: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol}`);
+    }
+
     botParams.maxRSI = recommendedMaxRSI;
     if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
     if (bestHours.length > 0) botParams.bestHours = bestHours;
     if (bestSectors.length > 0) botParams.bestSectors = bestSectors;
-    console.log(`✅ Learning: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol} | Hours: ${bestHours.join(',')} | Sectors: ${bestSectors.join(',')}`);
   } catch (e) {
     console.error('Learning failed:', e.message);
   }
@@ -786,11 +814,10 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
   const totalPositions = Object.keys(positions).length + Object.keys(shortPositions).length;
 
-  // Don't trade in neutral market — wait for clear direction
+  // Don't trade in neutral market
   if (currentRegime === 'neutral') return;
 
-  const adjustedMax = maxPositions;
-  if (totalPositions >= adjustedMax) return;
+  if (totalPositions >= maxPositions) return;
 
   const momentum = getMomentum(symbol);
   const signalScore = getSignalScore(indicators, daily);
@@ -812,7 +839,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
       .map(s => ({ symbol: s, score: getFullSignalScore(s) }))
       .sort((a, b) => b.score - a.score);
 
-    const slotsAvailable = adjustedMax - totalPositions;
+    const slotsAvailable = maxPositions - totalPositions;
     const topSymbols = ranked.slice(0, slotsAvailable).map(r => r.symbol);
     if (!topSymbols.includes(symbol)) return;
 
@@ -827,7 +854,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     lockSymbol(symbol);
     const regimeIcon = currentRegime === 'bull' ? '🐂' : '➡️';
     const newsIcon = news.sentiment === 'positive' ? '📰✅' : '';
-    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Rank: ${fullScore} | ${regimeIcon} | ${newsIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${adjustedMax}`);
+    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Rank: ${fullScore} | ${regimeIcon} | ${newsIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -857,7 +884,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
     lockSymbol(symbol);
     const regimeIcon = currentRegime === 'bear' ? '🐻' : '➡️';
-    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | ${regimeIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${adjustedMax}`);
+    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | ${regimeIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions}`);
     await placeOrder(symbol, shares, 'sell', session !== 'market');
     shortPositions[symbol] = {
       entryPrice: currentPrice,
@@ -878,7 +905,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — No Neutral Trading | 5-Loss Avoid | All Upgrades...');
+  console.log('🤖 Trading bot — Singleton Learning | No Neutral | All Upgrades...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -916,7 +943,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! No neutral trading | 5-loss avoid threshold | All upgrades active!');
+        console.log('✅ Subscribed! Singleton learning bot is live!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
