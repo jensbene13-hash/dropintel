@@ -42,17 +42,15 @@ const POSITIVE_KEYWORDS = [
 
 const MAX_POSITIONS_MARKET = 8;
 const MAX_POSITIONS_EXTENDED = 3;
-const STOP_LOSS_PCT = 0.004;
-const COOLDOWN_MS = 2 * 60 * 1000;
+const STOP_LOSS_PCT = 0.003; // Tightened to 0.3%
+const COOLDOWN_MS = 3 * 60 * 1000; // 3 minutes
 const MAX_PRICE_HISTORY = 100;
-
-// Dynamic trailing stop ranges
-const MIN_TRAILING_STOP = 0.003; // 0.3% for stable stocks
-const MAX_TRAILING_STOP = 0.015; // 1.5% for volatile stocks
+const MIN_TRAILING_STOP = 0.003;
+const MAX_TRAILING_STOP = 0.015;
 
 let botParams = {
-  maxRSI: 72,
-  minRSI: 28,
+  maxRSI: 65, // Tightened RSI range
+  minRSI: 35,
   avoidSymbols: [],
   preferredSymbols: [],
   bestHours: [],
@@ -85,14 +83,9 @@ let pingInterval = null;
 let isTrading = false;
 let isSubscribed = false;
 
-// Calculate volatility as average true range percentage
 function calculateVolatility(symbol) {
   const prices = realtimePrices[symbol];
-  if (!prices || prices.length < 20) {
-    return volatilityData[symbol] || 0.005; // default 0.5%
-  }
-
-  // Calculate average price change over last 20 ticks
+  if (!prices || prices.length < 20) return volatilityData[symbol] || 0.005;
   const changes = [];
   for (let i = 1; i < prices.length; i++) {
     changes.push(Math.abs(prices[i] - prices[i-1]) / prices[i-1]);
@@ -102,29 +95,17 @@ function calculateVolatility(symbol) {
   return avgChange;
 }
 
-// Get dynamic trailing stop based on volatility
 function getDynamicTrailingStop(symbol) {
   const volatility = calculateVolatility(symbol);
-
-  // Scale trailing stop with volatility
-  // Low volatility (0.001) → tight stop 0.3%
-  // High volatility (0.01+) → wide stop 1.5%
-  const scaled = Math.min(
-    Math.max(volatility * 1.5, MIN_TRAILING_STOP),
-    MAX_TRAILING_STOP
-  );
-
-  return scaled;
+  return Math.min(Math.max(volatility * 1.5, MIN_TRAILING_STOP), MAX_TRAILING_STOP);
 }
 
 function getMarketRegime() {
   const spy = realtimeIndicators['SPY'] || dailyIndicators['SPY'];
   const qqq = realtimeIndicators['QQQ'] || dailyIndicators['QQQ'];
   if (!spy) return 'neutral';
-
   const spyMomentum = getMomentum('SPY');
   const qqqMomentum = getMomentum('QQQ');
-
   const bullSignals = [
     spy.ma10 > spy.ma20,
     qqq ? qqq.ma10 > qqq.ma20 : false,
@@ -132,7 +113,6 @@ function getMarketRegime() {
     qqqMomentum > 0,
     spy.rsi > 45 && spy.rsi < 75,
   ].filter(Boolean).length;
-
   const bearSignals = [
     spy.ma10 < spy.ma20,
     qqq ? qqq.ma10 < qqq.ma20 : false,
@@ -140,7 +120,6 @@ function getMarketRegime() {
     qqqMomentum < 0,
     spy.rsi < 45,
   ].filter(Boolean).length;
-
   if (bullSignals >= 3) return 'bull';
   if (bearSignals >= 3) return 'bear';
   return 'neutral';
@@ -163,9 +142,7 @@ async function fetchNewsForSymbol(symbol) {
     const url = `https://newsapi.org/v2/everything?q=${query}&from=${from}&sortBy=publishedAt&pageSize=5&apiKey=${NEWS_API_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
-    if (!data.articles || data.articles.length === 0) {
-      return { sentiment: 'neutral', score: 0, hasNews: false };
-    }
+    if (!data.articles || data.articles.length === 0) return { sentiment: 'neutral', score: 0 };
     let positiveCount = 0;
     let negativeCount = 0;
     data.articles.forEach(article => {
@@ -177,9 +154,9 @@ async function fetchNewsForSymbol(symbol) {
     let sentiment = 'neutral';
     if (score > 2) sentiment = 'positive';
     else if (score < -1) sentiment = 'negative';
-    return { sentiment, score, hasNews: true };
+    return { sentiment, score };
   } catch (e) {
-    return { sentiment: 'neutral', score: 0, hasNews: false };
+    return { sentiment: 'neutral', score: 0 };
   }
 }
 
@@ -198,7 +175,7 @@ async function refreshNewsData() {
 }
 
 function getNewsSentiment(symbol) {
-  return newsData[symbol] || { sentiment: 'neutral', score: 0, hasNews: false };
+  return newsData[symbol] || { sentiment: 'neutral', score: 0 };
 }
 
 function getMomentum(symbol) {
@@ -251,7 +228,9 @@ async function loadLearnings() {
     const data = await res.json();
     if (data && data.length > 0) {
       const learning = data[0];
-      botParams.maxRSI = Math.min(parseFloat(learning.recommended_max_rsi) + 2 || 72, 75);
+      // Keep RSI tight — don't let learning loosen it too much
+      botParams.maxRSI = Math.min(parseFloat(learning.recommended_max_rsi) || 65, 65);
+      botParams.minRSI = 35;
       if (learning.best_symbol) botParams.preferredSymbols = [learning.best_symbol];
       if (learning.best_hours) botParams.bestHours = JSON.parse(learning.best_hours || '[]');
       if (learning.best_sectors) botParams.bestSectors = JSON.parse(learning.best_sectors || '[]');
@@ -291,8 +270,8 @@ async function runLearningAnalysis() {
     const losses = trades.filter(t => t.outcome === 'LOSS');
     const winRate = (wins.length / trades.length * 100).toFixed(2);
     const winRSI = wins.map(t => parseFloat(t.rsi)).filter(Boolean);
-    const avgWinRSI = winRSI.length > 0 ? winRSI.reduce((a, b) => a + b, 0) / winRSI.length : 65;
-    const recommendedMaxRSI = Math.min(avgWinRSI + 5, 72);
+    const avgWinRSI = winRSI.length > 0 ? winRSI.reduce((a, b) => a + b, 0) / winRSI.length : 55;
+    const recommendedMaxRSI = Math.min(avgWinRSI + 5, 65);
     const symbolStats = {};
     trades.forEach(t => {
       if (!symbolStats[t.symbol]) symbolStats[t.symbol] = { wins: 0, losses: 0 };
@@ -504,11 +483,8 @@ async function loadDailyIndicators(symbol) {
     const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
     const indicators = calculateIndicators(closes);
     if (indicators) volumeData[symbol] = { avgVolume };
-
-    // Calculate daily volatility from bar data
     const dailyChanges = closes.slice(-20).map((c, i, arr) => i === 0 ? 0 : Math.abs(c - arr[i-1]) / arr[i-1]);
     volatilityData[symbol] = dailyChanges.reduce((a, b) => a + b, 0) / dailyChanges.length;
-
     if (!realtimePrices[symbol] || realtimePrices[symbol].length < 26) {
       realtimePrices[symbol] = closes.slice(-MAX_PRICE_HISTORY);
       realtimeIndicators[symbol] = indicators;
@@ -562,9 +538,10 @@ function getSignalScore(indicators, daily) {
   let score = 0;
   if (indicators.ma10 > indicators.ma20) score++;
   if (daily && daily.ma10 > daily.ma20) score++;
-  if (indicators.rsi > botParams.minRSI && indicators.rsi < botParams.maxRSI) score++;
-  if (indicators.macd?.bullish) score++;
-  if (daily?.macd?.bullish) score++;
+  if (indicators.rsi >= botParams.minRSI && indicators.rsi <= botParams.maxRSI) score++;
+  // MACD must be positive — no weak signals
+  if (indicators.macd?.bullish && indicators.macd?.histogram > 0) score++;
+  if (daily?.macd?.bullish && daily?.macd?.histogram > 0) score++;
   return score;
 }
 
@@ -573,27 +550,22 @@ function getBearishScore(indicators, daily) {
   if (indicators.ma10 < indicators.ma20) score++;
   if (daily && daily.ma10 < daily.ma20) score++;
   if (indicators.rsi > 60) score++;
-  if (indicators.macd && !indicators.macd.bullish) score++;
-  if (daily?.macd && !daily.macd.bullish) score++;
+  if (indicators.macd && !indicators.macd.bullish && indicators.macd.histogram < 0) score++;
+  if (daily?.macd && !daily.macd.bullish && daily.macd.histogram < 0) score++;
   return score;
 }
 
 async function manageShortPosition(symbol, currentPrice, session) {
   const position = shortPositions[symbol];
   if (!position) return;
-
-  // Update trailing stop pct dynamically
   const newTrailingStopPct = getDynamicTrailingStop(symbol);
   position.trailingStopPct = newTrailingStopPct;
-
   const pnlPct = (position.entryPrice - currentPrice) / position.entryPrice;
-
   if (currentPrice < position.lowestPrice) {
     position.lowestPrice = currentPrice;
     position.trailingStop = currentPrice * (1 + position.trailingStopPct);
     console.log(`📊 SHORT ${symbol} new low $${currentPrice} | Stop: $${position.trailingStop.toFixed(2)} (${(position.trailingStopPct*100).toFixed(2)}%)`);
   }
-
   if (currentPrice >= position.trailingStop && pnlPct > 0) {
     isTrading = true;
     console.log(`🟢 SHORT COVER: ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
@@ -609,7 +581,6 @@ async function manageShortPosition(symbol, currentPrice, session) {
     setTimeout(runLearningAnalysis, 2000);
     return;
   }
-
   if (pnlPct <= -STOP_LOSS_PCT) {
     isTrading = true;
     console.log(`🔴 SHORT STOP LOSS: ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
@@ -631,7 +602,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (botParams.avoidSymbols.includes(symbol)) return;
 
   updateRealtimeData(symbol, currentPrice, tradeSize);
-
   if (symbol === 'SPY' || symbol === 'QQQ') updateRegime();
 
   const session = getMarketSession();
@@ -651,8 +621,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (positions[symbol]) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
-
-    // Update trailing stop dynamically
     const newTrailingStopPct = getDynamicTrailingStop(symbol);
     position.trailingStopPct = newTrailingStopPct;
 
@@ -712,13 +680,13 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (shares < 1) return;
 
   const trailingStopPct = getDynamicTrailingStop(symbol);
-  const volatilityPct = (trailingStopPct * 100).toFixed(2);
 
-  if (currentRegime !== 'bear' && signalScore >= 3 && momentum >= 0) {
+  // LONG — requires 4/5 signals + positive momentum
+  if (currentRegime !== 'bear' && signalScore >= 4 && momentum > 0) {
     isTrading = true;
     const regimeIcon = currentRegime === 'bull' ? '🐂' : '➡️';
     const newsIcon = news.sentiment === 'positive' ? '📰✅' : '';
-    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | ${regimeIcon} | ${newsIcon} | Stop: ${volatilityPct}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${adjustedMax}`);
+    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | ${regimeIcon} | ${newsIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${adjustedMax}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -738,10 +706,11 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     return;
   }
 
-  if (currentRegime !== 'bull' && bearishScore >= 3 && momentum < 0) {
+  // SHORT — requires 4/5 bearish signals + negative momentum
+  if (currentRegime !== 'bull' && bearishScore >= 4 && momentum < 0) {
     isTrading = true;
     const regimeIcon = currentRegime === 'bear' ? '🐻' : '➡️';
-    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | ${regimeIcon} | Stop: ${volatilityPct}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${adjustedMax}`);
+    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | ${regimeIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${adjustedMax}`);
     await placeOrder(symbol, shares, 'sell', session !== 'market');
     shortPositions[symbol] = {
       entryPrice: currentPrice,
@@ -762,7 +731,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Dynamic Stops + Regime + Long/Short + News + Learning...');
+  console.log('🤖 Trading bot — 65% Win Rate Target | Tighter Signals | Dynamic Stops...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -800,7 +769,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Dynamic Stops bot is now live!');
+        console.log('✅ Subscribed! Targeting 65% win rate — quality over quantity!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
