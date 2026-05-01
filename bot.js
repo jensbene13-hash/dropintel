@@ -40,18 +40,18 @@ const POSITIVE_KEYWORDS = [
   'innovation', 'launch', 'expansion', 'dividend', 'buyback'
 ];
 
-const MAX_POSITIONS_MARKET = 8;
-const MAX_POSITIONS_EXTENDED = 3;
-const STOP_LOSS_PCT = 0.003;
+const MAX_POSITIONS_MARKET = 3; // Conservative until win rate proven
+const MAX_POSITIONS_EXTENDED = 2;
+const STOP_LOSS_PCT = 0.006; // Widened to 0.6% to avoid noise stops
 const COOLDOWN_MS = 3 * 60 * 1000;
 const MAX_PRICE_HISTORY = 100;
-const MIN_TRAILING_STOP = 0.003;
-const MAX_TRAILING_STOP = 0.015;
+const MIN_TRAILING_STOP = 0.005; // Widened minimum trailing stop
+const MAX_TRAILING_STOP = 0.02;
 const REGIME_STABILITY_THRESHOLD = 30;
-const MIN_PROFIT_TO_TRAIL = 0.002;
+const MIN_PROFIT_TO_TRAIL = 0.003; // 0.3% min profit before trailing
 const AVOID_RESET_HOURS = 24;
 const AVOID_LOSS_THRESHOLD = 5;
-const SINGLETON_LEARNING_ID = 'dropintel-main';
+const MAX_DAILY_LOSS_PCT = 0.02; // Stop trading if down 2% today
 
 let botParams = {
   maxRSI: 65,
@@ -69,6 +69,9 @@ let volatilityData = {};
 let regimeCandidateCount = 0;
 let regimeCandidate = 'neutral';
 let tradingLocks = {};
+let todayOpenPrices = {}; // #1 — Track today's open prices
+let startingPortfolioValue = null; // #4 — Daily loss protection
+let dailyTradingHalted = false;
 
 const SECTOR_MAP = {
   'AAPL': 'tech', 'NVDA': 'tech', 'MSFT': 'tech', 'META': 'tech', 'GOOGL': 'tech',
@@ -109,6 +112,62 @@ function refreshAvoidList() {
   }
 }
 
+// #1 — Load today's opening prices
+async function loadTodayOpenPrices() {
+  try {
+    console.log('📈 Loading today\'s opening prices...');
+    const today = new Date().toISOString().split('T')[0];
+    for (const symbol of WATCHLIST) {
+      const res = await fetch(
+        `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&start=${today}&limit=1`,
+        { headers: { 'APCA-API-KEY-ID': API_KEY, 'APCA-API-SECRET-KEY': SECRET_KEY } }
+      );
+      const data = await res.json();
+      if (data.bars && data.bars.length > 0) {
+        todayOpenPrices[symbol] = data.bars[0].o;
+      }
+    }
+    console.log(`✅ Loaded open prices for ${Object.keys(todayOpenPrices).length} stocks`);
+  } catch (e) {
+    console.error('Failed to load open prices:', e.message);
+  }
+}
+
+// #2 — Check if stock is up from today's open
+function isUpFromOpen(symbol, currentPrice) {
+  const openPrice = todayOpenPrices[symbol];
+  if (!openPrice) return true; // Allow if we don't have open price
+  return currentPrice > openPrice;
+}
+
+// #4 — Check portfolio and halt if down too much
+async function checkDailyLossLimit() {
+  try {
+    const res = await fetch(`${BASE_URL}/v2/account`, {
+      headers: { 'APCA-API-KEY-ID': API_KEY, 'APCA-API-SECRET-KEY': SECRET_KEY }
+    });
+    const account = await res.json();
+    const currentValue = parseFloat(account.portfolio_value);
+
+    if (!startingPortfolioValue) {
+      startingPortfolioValue = currentValue;
+      console.log(`💰 Starting portfolio value: $${startingPortfolioValue.toFixed(2)}`);
+      return;
+    }
+
+    const dailyLossPct = (startingPortfolioValue - currentValue) / startingPortfolioValue;
+    if (dailyLossPct >= MAX_DAILY_LOSS_PCT && !dailyTradingHalted) {
+      dailyTradingHalted = true;
+      console.log(`🛑 DAILY LOSS LIMIT HIT: Down ${(dailyLossPct*100).toFixed(2)}% — halting new trades for today!`);
+    } else if (dailyLossPct < MAX_DAILY_LOSS_PCT && dailyTradingHalted) {
+      dailyTradingHalted = false;
+      console.log(`✅ Portfolio recovered — resuming trading`);
+    }
+  } catch (e) {
+    console.error('Failed to check daily loss:', e.message);
+  }
+}
+
 function calculateVolatility(symbol) {
   const prices = realtimePrices[symbol];
   if (!prices || prices.length < 20) return volatilityData[symbol] || 0.005;
@@ -123,7 +182,7 @@ function calculateVolatility(symbol) {
 
 function getDynamicTrailingStop(symbol) {
   const volatility = calculateVolatility(symbol);
-  return Math.min(Math.max(volatility * 1.5, MIN_TRAILING_STOP), MAX_TRAILING_STOP);
+  return Math.min(Math.max(volatility * 2, MIN_TRAILING_STOP), MAX_TRAILING_STOP);
 }
 
 function getLongMomentum(symbol) {
@@ -272,6 +331,8 @@ function getFullSignalScore(symbol) {
   if (momentum > 0) score += 2;
   if (news.sentiment === 'positive') score += 2;
   if (botParams.preferredSymbols.includes(symbol)) score += 3;
+  // #2 — Bonus for stocks up from open
+  if (isUpFromOpen(symbol, realtimePrices[symbol]?.slice(-1)[0] || 0)) score += 3;
   return score;
 }
 
@@ -445,7 +506,6 @@ async function runLearningAnalysis() {
       total_trades: trades.length,
     };
 
-    // Check if singleton record exists
     const existingRes = await fetch(
       `${SUPABASE_URL}/rest/v1/learnings?limit=1`,
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
@@ -453,7 +513,6 @@ async function runLearningAnalysis() {
     const existing = await existingRes.json();
 
     if (existing && existing.length > 0) {
-      // UPDATE existing record
       await fetch(`${SUPABASE_URL}/rest/v1/learnings?id=eq.${existing[0].id}`, {
         method: 'PATCH',
         headers: {
@@ -464,9 +523,7 @@ async function runLearningAnalysis() {
         },
         body: JSON.stringify(learningData)
       });
-      console.log(`✅ Learning UPDATED: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol}`);
     } else {
-      // INSERT first record
       await fetch(`${SUPABASE_URL}/rest/v1/learnings`, {
         method: 'POST',
         headers: {
@@ -477,13 +534,13 @@ async function runLearningAnalysis() {
         },
         body: JSON.stringify(learningData)
       });
-      console.log(`✅ Learning CREATED: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol}`);
     }
 
     botParams.maxRSI = recommendedMaxRSI;
     if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
     if (bestHours.length > 0) botParams.bestHours = bestHours;
     if (bestSectors.length > 0) botParams.bestSectors = bestSectors;
+    console.log(`✅ Learning: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol}`);
   } catch (e) {
     console.error('Learning failed:', e.message);
   }
@@ -664,6 +721,7 @@ function scheduleRefresh() {
   setInterval(async () => {
     await loadAllDailyIndicators();
     await loadExistingPositions();
+    await loadTodayOpenPrices();
   }, 30 * 60 * 1000);
 
   setInterval(async () => {
@@ -675,13 +733,29 @@ function scheduleRefresh() {
     await refreshNewsData();
   }, 30 * 60 * 1000);
 
+  // Check daily loss limit every 5 minutes
+  setInterval(async () => {
+    await checkDailyLossLimit();
+  }, 5 * 60 * 1000);
+
   setInterval(() => {
     refreshAvoidList();
   }, 60 * 60 * 1000);
 
+  // Reset daily trading halt at market open
   setInterval(() => {
     const now = new Date();
-    if (now.getUTCHours() === 21 && now.getUTCMinutes() === 0) {
+    const utcHour = now.getUTCHours();
+    const utcMinute = now.getUTCMinutes();
+    if (utcHour === 14 && utcMinute === 30) {
+      dailyTradingHalted = false;
+      startingPortfolioValue = null;
+      todayOpenPrices = {};
+      console.log('🔔 Market open — resetting daily protection and loading open prices...');
+      loadTodayOpenPrices();
+      checkDailyLossLimit();
+    }
+    if (utcHour === 21 && utcMinute === 0) {
       console.log('🔔 Market closed — running final learning analysis...');
       runLearningAnalysis();
     }
@@ -812,11 +886,11 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (maxPositions === 0) return;
   if (isOnCooldown(symbol)) return;
 
+  // #4 — Stop new trades if daily loss limit hit
+  if (dailyTradingHalted) return;
+
   const totalPositions = Object.keys(positions).length + Object.keys(shortPositions).length;
-
-  // Don't trade in neutral market
   if (currentRegime === 'neutral') return;
-
   if (totalPositions >= maxPositions) return;
 
   const momentum = getMomentum(symbol);
@@ -824,10 +898,14 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   const bearishScore = getBearishScore(indicators, daily);
 
   if (currentRegime !== 'bear' && signalScore >= 4 && momentum > 0) {
+    // #2 — Must be up from today's open
+    if (!isUpFromOpen(symbol, currentPrice)) return;
+
     const qualifyingSymbols = WATCHLIST.filter(s => {
       if (botParams.avoidSymbols.includes(s)) return false;
       if (positions[s] || shortPositions[s]) return false;
       if (isOnCooldown(s)) return false;
+      if (!isUpFromOpen(s, realtimePrices[s]?.slice(-1)[0] || 0)) return false;
       const ind = realtimeIndicators[s] || dailyIndicators[s];
       if (!ind) return false;
       const sc = getSignalScore(ind, dailyIndicators[s]);
@@ -850,11 +928,13 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
     const trailingStopPct = getDynamicTrailingStop(symbol);
     const fullScore = getFullSignalScore(symbol);
+    const openPrice = todayOpenPrices[symbol];
+    const upFromOpen = openPrice ? ((currentPrice - openPrice) / openPrice * 100).toFixed(2) : 'N/A';
 
     lockSymbol(symbol);
     const regimeIcon = currentRegime === 'bull' ? '🐂' : '➡️';
     const newsIcon = news.sentiment === 'positive' ? '📰✅' : '';
-    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Rank: ${fullScore} | ${regimeIcon} | ${newsIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions}`);
+    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Rank: ${fullScore} | Up from open: +${upFromOpen}% | ${regimeIcon} | ${newsIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions}`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -875,6 +955,9 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   }
 
   if (currentRegime !== 'bull' && bearishScore >= 4 && momentum < 0) {
+    // For shorts — must be DOWN from open
+    if (isUpFromOpen(symbol, currentPrice)) return;
+
     const isPreferred = botParams.preferredSymbols.includes(symbol);
     const maxTrade = getPositionSize(indicators, isPreferred, news.sentiment);
     const shares = Math.floor(maxTrade / currentPrice);
@@ -905,7 +988,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Singleton Learning | No Neutral | All Upgrades...');
+  console.log('🤖 Trading bot — Up From Open | Daily Loss Limit | Conservative | All Upgrades...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -915,8 +998,10 @@ function startBot() {
 
   loadLearnings()
     .then(() => loadAllDailyIndicators())
+    .then(() => loadTodayOpenPrices())
     .then(() => refreshNewsData());
   loadExistingPositions();
+  checkDailyLossLimit();
   scheduleRefresh();
 
   ws.on('open', () => {
@@ -943,7 +1028,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Singleton learning bot is live!');
+        console.log('✅ Subscribed! Up-from-open filter | Daily loss protection | Conservative positions!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
