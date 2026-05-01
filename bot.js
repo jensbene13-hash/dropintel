@@ -47,7 +47,7 @@ const COOLDOWN_MS = 3 * 60 * 1000;
 const MAX_PRICE_HISTORY = 100;
 const MIN_TRAILING_STOP = 0.003;
 const MAX_TRAILING_STOP = 0.015;
-const REGIME_STABILITY_THRESHOLD = 15; // Must see 15 consecutive ticks before changing regime
+const REGIME_STABILITY_THRESHOLD = 30;
 
 let botParams = {
   maxRSI: 65,
@@ -61,8 +61,6 @@ let botParams = {
 let newsData = {};
 let currentRegime = 'neutral';
 let volatilityData = {};
-
-// Regime stability tracking
 let regimeCandidateCount = 0;
 let regimeCandidate = 'neutral';
 
@@ -105,13 +103,30 @@ function getDynamicTrailingStop(symbol) {
   return Math.min(Math.max(volatility * 1.5, MIN_TRAILING_STOP), MAX_TRAILING_STOP);
 }
 
+function getLongMomentum(symbol) {
+  // Use last 20 ticks for more stable momentum reading
+  const prices = realtimePrices[symbol];
+  if (!prices || prices.length < 20) return 0;
+  const recent = prices.slice(-20);
+  return recent[recent.length - 1] - recent[0];
+}
+
+function getMomentum(symbol) {
+  // Short momentum for trade entries
+  const prices = realtimePrices[symbol];
+  if (!prices || prices.length < 5) return 0;
+  const recent = prices.slice(-5);
+  return recent[recent.length - 1] - recent[0];
+}
+
 function getMarketRegime() {
   const spy = realtimeIndicators['SPY'] || dailyIndicators['SPY'];
   const qqq = realtimeIndicators['QQQ'] || dailyIndicators['QQQ'];
   if (!spy) return 'neutral';
 
-  const spyMomentum = getMomentum('SPY');
-  const qqqMomentum = getMomentum('QQQ');
+  // Use long momentum for regime detection
+  const spyMomentum = getLongMomentum('SPY');
+  const qqqMomentum = getLongMomentum('QQQ');
 
   const bullSignals = [
     spy.ma10 > spy.ma20,
@@ -129,34 +144,31 @@ function getMarketRegime() {
     spy.rsi < 45,
   ].filter(Boolean).length;
 
-  if (bullSignals >= 3) return 'bull';
-  if (bearSignals >= 3) return 'bear';
+  // Need 4/5 signals now instead of 3/5 for more stability
+  if (bullSignals >= 4) return 'bull';
+  if (bearSignals >= 4) return 'bear';
   return 'neutral';
 }
 
 function updateRegime() {
   const detectedRegime = getMarketRegime();
 
-  // If same as current, no change needed
   if (detectedRegime === currentRegime) {
     regimeCandidateCount = 0;
     regimeCandidate = currentRegime;
     return currentRegime;
   }
 
-  // If different, start counting
   if (detectedRegime === regimeCandidate) {
     regimeCandidateCount++;
   } else {
-    // New candidate — reset counter
     regimeCandidate = detectedRegime;
     regimeCandidateCount = 1;
   }
 
-  // Only change regime after REGIME_STABILITY_THRESHOLD consecutive ticks
   if (regimeCandidateCount >= REGIME_STABILITY_THRESHOLD) {
     if (regimeCandidate !== currentRegime) {
-      console.log(`🌍 Market regime confirmed: ${currentRegime} → ${regimeCandidate} (stable for ${REGIME_STABILITY_THRESHOLD} ticks)`);
+      console.log(`🌍 Market regime confirmed: ${currentRegime} → ${regimeCandidate}`);
       currentRegime = regimeCandidate;
       regimeCandidateCount = 0;
     }
@@ -207,13 +219,6 @@ async function refreshNewsData() {
 
 function getNewsSentiment(symbol) {
   return newsData[symbol] || { sentiment: 'neutral', score: 0 };
-}
-
-function getMomentum(symbol) {
-  const prices = realtimePrices[symbol];
-  if (!prices || prices.length < 5) return 0;
-  const recent = prices.slice(-5);
-  return recent[recent.length - 1] - recent[0];
 }
 
 function getPositionSize(indicators, isPreferred, newsSentiment) {
@@ -295,7 +300,10 @@ async function runLearningAnalysis() {
       { headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` } }
     );
     const trades = await tradesRes.json();
-    if (!trades || trades.length < 3) return;
+    if (!trades || trades.length < 3) {
+      console.log(`📊 Not enough trades for learning yet (${trades?.length || 0} completed)`);
+      return;
+    }
     const wins = trades.filter(t => t.outcome === 'WIN');
     const losses = trades.filter(t => t.outcome === 'LOSS');
     const winRate = (wins.length / trades.length * 100).toFixed(2);
@@ -358,7 +366,7 @@ async function runLearningAnalysis() {
     if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
     if (bestHours.length > 0) botParams.bestHours = bestHours;
     if (bestSectors.length > 0) botParams.bestSectors = bestSectors;
-    console.log(`✅ Learning: Win rate ${winRate}% | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol}`);
+    console.log(`✅ Learning: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol} | Hours: ${bestHours.join(',')} | Sectors: ${bestSectors.join(',')}`);
   } catch (e) {
     console.error('Learning failed:', e.message);
   }
@@ -758,7 +766,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Stable Regime + 65% Win Rate Target + Dynamic Stops...');
+  console.log('🤖 Trading bot — Stable Regime + 65% Win Rate + Dynamic Stops...');
   isSubscribed = false;
 
   const session = getMarketSession();
@@ -796,7 +804,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Stable regime bot targeting 65% win rate!');
+        console.log('✅ Subscribed! Stable regime bot is live!');
       }
       if (msg.T === 'error') {
         console.error('❌ Alpaca error:', JSON.stringify(msg));
