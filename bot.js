@@ -40,22 +40,21 @@ const POSITIVE_KEYWORDS = [
   'innovation', 'launch', 'expansion', 'dividend', 'buyback'
 ];
 
-const MAX_POSITIONS_MARKET = 3; // Conservative until win rate proven
-const MAX_POSITIONS_EXTENDED = 2;
-const STOP_LOSS_PCT = 0.006; // Widened to 0.6% to avoid noise stops
+const STOP_LOSS_PCT = 0.006;
 const COOLDOWN_MS = 3 * 60 * 1000;
 const MAX_PRICE_HISTORY = 100;
-const MIN_TRAILING_STOP = 0.005; // Widened minimum trailing stop
+const MIN_TRAILING_STOP = 0.005;
 const MAX_TRAILING_STOP = 0.02;
 const REGIME_STABILITY_THRESHOLD = 30;
-const MIN_PROFIT_TO_TRAIL = 0.003; // 0.3% min profit before trailing
+const MIN_PROFIT_TO_TRAIL = 0.003;
 const AVOID_RESET_HOURS = 24;
 const AVOID_LOSS_THRESHOLD = 5;
-const MAX_DAILY_LOSS_PCT = 0.02; // Stop trading if down 2% today
+const MAX_DAILY_LOSS_PCT = 0.02;
 
 let botParams = {
   maxRSI: 65,
   minRSI: 35,
+  winRate: 0,
   avoidSymbols: [],
   avoidTimestamps: {},
   preferredSymbols: [],
@@ -69,8 +68,8 @@ let volatilityData = {};
 let regimeCandidateCount = 0;
 let regimeCandidate = 'neutral';
 let tradingLocks = {};
-let todayOpenPrices = {}; // #1 — Track today's open prices
-let startingPortfolioValue = null; // #4 — Daily loss protection
+let todayOpenPrices = {};
+let startingPortfolioValue = null;
 let dailyTradingHalted = false;
 
 const SECTOR_MAP = {
@@ -94,6 +93,24 @@ let cooldowns = {};
 let pingInterval = null;
 let isSubscribed = false;
 
+// Dynamic max positions based on proven win rate
+function getMaxPositionsByWinRate() {
+  const winRate = botParams.winRate || 0;
+  if (winRate >= 65) {
+    console.log(`🔥 Win rate ${winRate}% — running at FULL 8 positions!`);
+    return 8;
+  }
+  if (winRate >= 50) {
+    console.log(`✅ Win rate ${winRate}% — running at 5 positions`);
+    return 5;
+  }
+  if (winRate >= 35) {
+    console.log(`⚠️ Win rate ${winRate}% — running conservatively at 3 positions`);
+    return 3;
+  }
+  return 2;
+}
+
 function isSymbolLocked(symbol) { return tradingLocks[symbol] === true; }
 function lockSymbol(symbol) { tradingLocks[symbol] = true; }
 function unlockSymbol(symbol) { tradingLocks[symbol] = false; }
@@ -112,7 +129,6 @@ function refreshAvoidList() {
   }
 }
 
-// #1 — Load today's opening prices
 async function loadTodayOpenPrices() {
   try {
     console.log('📈 Loading today\'s opening prices...');
@@ -133,14 +149,12 @@ async function loadTodayOpenPrices() {
   }
 }
 
-// #2 — Check if stock is up from today's open
 function isUpFromOpen(symbol, currentPrice) {
   const openPrice = todayOpenPrices[symbol];
-  if (!openPrice) return true; // Allow if we don't have open price
+  if (!openPrice) return true;
   return currentPrice > openPrice;
 }
 
-// #4 — Check portfolio and halt if down too much
 async function checkDailyLossLimit() {
   try {
     const res = await fetch(`${BASE_URL}/v2/account`, {
@@ -148,17 +162,15 @@ async function checkDailyLossLimit() {
     });
     const account = await res.json();
     const currentValue = parseFloat(account.portfolio_value);
-
     if (!startingPortfolioValue) {
       startingPortfolioValue = currentValue;
       console.log(`💰 Starting portfolio value: $${startingPortfolioValue.toFixed(2)}`);
       return;
     }
-
     const dailyLossPct = (startingPortfolioValue - currentValue) / startingPortfolioValue;
     if (dailyLossPct >= MAX_DAILY_LOSS_PCT && !dailyTradingHalted) {
       dailyTradingHalted = true;
-      console.log(`🛑 DAILY LOSS LIMIT HIT: Down ${(dailyLossPct*100).toFixed(2)}% — halting new trades for today!`);
+      console.log(`🛑 DAILY LOSS LIMIT HIT: Down ${(dailyLossPct*100).toFixed(2)}% — halting new trades!`);
     } else if (dailyLossPct < MAX_DAILY_LOSS_PCT && dailyTradingHalted) {
       dailyTradingHalted = false;
       console.log(`✅ Portfolio recovered — resuming trading`);
@@ -331,7 +343,6 @@ function getFullSignalScore(symbol) {
   if (momentum > 0) score += 2;
   if (news.sentiment === 'positive') score += 2;
   if (botParams.preferredSymbols.includes(symbol)) score += 3;
-  // #2 — Bonus for stocks up from open
   if (isUpFromOpen(symbol, realtimePrices[symbol]?.slice(-1)[0] || 0)) score += 3;
   return score;
 }
@@ -352,16 +363,14 @@ async function closePosition(symbol, reason) {
   try {
     if (positions[symbol]) {
       console.log(`🚪 Auto-closing LONG ${symbol} — reason: ${reason}`);
-      const pos = positions[symbol];
-      await placeOrder(symbol, pos.shares, 'sell');
+      await placeOrder(symbol, positions[symbol].shares, 'sell');
       await updateTradeOutcome(symbol, 'LOSS', '0');
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
     }
     if (shortPositions[symbol]) {
       console.log(`🚪 Auto-closing SHORT ${symbol} — reason: ${reason}`);
-      const pos = shortPositions[symbol];
-      await placeOrder(symbol, pos.shares, 'buy');
+      await placeOrder(symbol, shortPositions[symbol].shares, 'buy');
       await updateTradeOutcome(symbol, 'LOSS', '0');
       delete shortPositions[symbol];
       cooldowns[symbol] = Date.now();
@@ -379,8 +388,7 @@ async function updateTradeOutcome(symbol, outcome, profitLoss) {
     );
     const trades = await res.json();
     if (trades && trades.length > 0) {
-      const tradeId = trades[0].id;
-      await fetch(`${SUPABASE_URL}/rest/v1/trades?id=eq.${tradeId}`, {
+      await fetch(`${SUPABASE_URL}/rest/v1/trades?id=eq.${trades[0].id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -410,12 +418,14 @@ async function loadLearnings() {
       const learning = data[0];
       botParams.maxRSI = Math.min(parseFloat(learning.recommended_max_rsi) || 65, 65);
       botParams.minRSI = 35;
+      botParams.winRate = parseFloat(learning.win_rate) || 0;
       if (learning.best_symbol) botParams.preferredSymbols = [learning.best_symbol];
       if (learning.best_hours) botParams.bestHours = JSON.parse(learning.best_hours || '[]');
       if (learning.best_sectors) botParams.bestSectors = JSON.parse(learning.best_sectors || '[]');
-      console.log(`📊 Learnings loaded! Win rate: ${learning.win_rate}% | maxRSI: ${botParams.maxRSI} | Best: ${learning.best_symbol}`);
+      const maxPos = getMaxPositionsByWinRate();
+      console.log(`📊 Learnings loaded! Win rate: ${botParams.winRate}% | maxRSI: ${botParams.maxRSI} | Best: ${learning.best_symbol} | Max positions: ${maxPos}`);
     } else {
-      console.log('📊 No learnings yet — using default parameters');
+      console.log('📊 No learnings yet — using conservative defaults (2 positions)');
     }
     const tradesRes = await fetch(
       `${SUPABASE_URL}/rest/v1/trades?outcome=eq.LOSS&order=created_at.desc&limit=50`,
@@ -458,6 +468,8 @@ async function runLearningAnalysis() {
     const wins = trades.filter(t => t.outcome === 'WIN');
     const losses = trades.filter(t => t.outcome === 'LOSS');
     const winRate = (wins.length / trades.length * 100).toFixed(2);
+    botParams.winRate = parseFloat(winRate);
+
     const winRSI = wins.map(t => parseFloat(t.rsi)).filter(Boolean);
     const avgWinRSI = winRSI.length > 0 ? winRSI.reduce((a, b) => a + b, 0) / winRSI.length : 55;
     const recommendedMaxRSI = Math.min(avgWinRSI + 5, 65);
@@ -536,11 +548,12 @@ async function runLearningAnalysis() {
       });
     }
 
+    const maxPos = getMaxPositionsByWinRate();
     botParams.maxRSI = recommendedMaxRSI;
     if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
     if (bestHours.length > 0) botParams.bestHours = bestHours;
     if (bestSectors.length > 0) botParams.bestSectors = bestSectors;
-    console.log(`✅ Learning: Win rate ${winRate}% | Trades: ${trades.length} | maxRSI: ${recommendedMaxRSI.toFixed(2)} | Best: ${bestSymbol}`);
+    console.log(`✅ Learning: Win rate ${winRate}% | Trades: ${trades.length} | Max positions unlocked: ${maxPos} | Best: ${bestSymbol}`);
   } catch (e) {
     console.error('Learning failed:', e.message);
   }
@@ -561,8 +574,8 @@ function getMarketSession() {
 
 function getMaxPositions() {
   const session = getMarketSession();
-  if (session === 'market') return MAX_POSITIONS_MARKET;
-  if (session === 'pre_market' || session === 'after_hours') return MAX_POSITIONS_EXTENDED;
+  if (session === 'market') return getMaxPositionsByWinRate();
+  if (session === 'pre_market' || session === 'after_hours') return Math.min(getMaxPositionsByWinRate(), 3);
   return 0;
 }
 
@@ -733,7 +746,6 @@ function scheduleRefresh() {
     await refreshNewsData();
   }, 30 * 60 * 1000);
 
-  // Check daily loss limit every 5 minutes
   setInterval(async () => {
     await checkDailyLossLimit();
   }, 5 * 60 * 1000);
@@ -742,7 +754,6 @@ function scheduleRefresh() {
     refreshAvoidList();
   }, 60 * 60 * 1000);
 
-  // Reset daily trading halt at market open
   setInterval(() => {
     const now = new Date();
     const utcHour = now.getUTCHours();
@@ -751,7 +762,7 @@ function scheduleRefresh() {
       dailyTradingHalted = false;
       startingPortfolioValue = null;
       todayOpenPrices = {};
-      console.log('🔔 Market open — resetting daily protection and loading open prices...');
+      console.log('🔔 Market open — resetting daily protection...');
       loadTodayOpenPrices();
       checkDailyLossLimit();
     }
@@ -789,8 +800,7 @@ function getBearishScore(indicators, daily) {
 
 async function manageShortPosition(symbol, currentPrice, session) {
   const position = shortPositions[symbol];
-  if (!position) return;
-  if (isSymbolLocked(symbol)) return;
+  if (!position || isSymbolLocked(symbol)) return;
   const newTrailingStopPct = getDynamicTrailingStop(symbol);
   position.trailingStopPct = newTrailingStopPct;
   const pnlPct = (position.entryPrice - currentPrice) / position.entryPrice;
@@ -846,8 +856,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (positions[symbol]) {
     const position = positions[symbol];
     const pnlPct = (currentPrice - position.entryPrice) / position.entryPrice;
-    const newTrailingStopPct = getDynamicTrailingStop(symbol);
-    position.trailingStopPct = newTrailingStopPct;
+    position.trailingStopPct = getDynamicTrailingStop(symbol);
 
     if (currentPrice > position.highestPrice) {
       position.highestPrice = currentPrice;
@@ -885,8 +894,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   const maxPositions = getMaxPositions();
   if (maxPositions === 0) return;
   if (isOnCooldown(symbol)) return;
-
-  // #4 — Stop new trades if daily loss limit hit
   if (dailyTradingHalted) return;
 
   const totalPositions = Object.keys(positions).length + Object.keys(shortPositions).length;
@@ -898,7 +905,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   const bearishScore = getBearishScore(indicators, daily);
 
   if (currentRegime !== 'bear' && signalScore >= 4 && momentum > 0) {
-    // #2 — Must be up from today's open
     if (!isUpFromOpen(symbol, currentPrice)) return;
 
     const qualifyingSymbols = WATCHLIST.filter(s => {
@@ -908,17 +914,14 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
       if (!isUpFromOpen(s, realtimePrices[s]?.slice(-1)[0] || 0)) return false;
       const ind = realtimeIndicators[s] || dailyIndicators[s];
       if (!ind) return false;
-      const sc = getSignalScore(ind, dailyIndicators[s]);
-      const mom = getMomentum(s);
-      return sc >= 4 && mom > 0;
+      return getSignalScore(ind, dailyIndicators[s]) >= 4 && getMomentum(s) > 0;
     });
 
     const ranked = qualifyingSymbols
       .map(s => ({ symbol: s, score: getFullSignalScore(s) }))
       .sort((a, b) => b.score - a.score);
 
-    const slotsAvailable = maxPositions - totalPositions;
-    const topSymbols = ranked.slice(0, slotsAvailable).map(r => r.symbol);
+    const topSymbols = ranked.slice(0, maxPositions - totalPositions).map(r => r.symbol);
     if (!topSymbols.includes(symbol)) return;
 
     const isPreferred = botParams.preferredSymbols.includes(symbol);
@@ -927,14 +930,11 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     if (shares < 1) return;
 
     const trailingStopPct = getDynamicTrailingStop(symbol);
-    const fullScore = getFullSignalScore(symbol);
     const openPrice = todayOpenPrices[symbol];
     const upFromOpen = openPrice ? ((currentPrice - openPrice) / openPrice * 100).toFixed(2) : 'N/A';
 
     lockSymbol(symbol);
-    const regimeIcon = currentRegime === 'bull' ? '🐂' : '➡️';
-    const newsIcon = news.sentiment === 'positive' ? '📰✅' : '';
-    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Rank: ${fullScore} | Up from open: +${upFromOpen}% | ${regimeIcon} | ${newsIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions}`);
+    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Rank: ${getFullSignalScore(symbol)} | +${upFromOpen}% from open | 🐂 | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions} [WR:${botParams.winRate}%]`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -955,7 +955,6 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   }
 
   if (currentRegime !== 'bull' && bearishScore >= 4 && momentum < 0) {
-    // For shorts — must be DOWN from open
     if (isUpFromOpen(symbol, currentPrice)) return;
 
     const isPreferred = botParams.preferredSymbols.includes(symbol);
@@ -966,8 +965,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     const trailingStopPct = getDynamicTrailingStop(symbol);
 
     lockSymbol(symbol);
-    const regimeIcon = currentRegime === 'bear' ? '🐻' : '➡️';
-    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | ${regimeIcon} | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions}`);
+    console.log(`📉 SHORT: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Bearish: ${bearishScore}/5 | 🐻 | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions} [WR:${botParams.winRate}%]`);
     await placeOrder(symbol, shares, 'sell', session !== 'market');
     shortPositions[symbol] = {
       entryPrice: currentPrice,
@@ -988,9 +986,8 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Up From Open | Daily Loss Limit | Conservative | All Upgrades...');
+  console.log('🤖 Trading bot — Dynamic Positions by Win Rate | Up From Open | All Upgrades...');
   isSubscribed = false;
-
   const session = getMarketSession();
   console.log(`📅 Current session: ${session}`);
 
@@ -1007,14 +1004,11 @@ function startBot() {
   ws.on('open', () => {
     console.log('✅ Connected to Alpaca IEX WebSocket!');
     ws.send(JSON.stringify({ action: 'auth', key: API_KEY, secret: SECRET_KEY }));
-
     if (pingInterval) clearInterval(pingInterval);
     pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.ping();
-        if (!isSubscribed) {
-          ws.send(JSON.stringify({ action: 'subscribe', trades: WATCHLIST }));
-        }
+        if (!isSubscribed) ws.send(JSON.stringify({ action: 'subscribe', trades: WATCHLIST }));
       }
     }, 30000);
   });
@@ -1023,19 +1017,16 @@ function startBot() {
     const messages = JSON.parse(data);
     for (const msg of messages) {
       if (msg.T === 'success' && msg.msg === 'authenticated') {
-        console.log('✅ Authenticated! Subscribing to live trades...');
+        console.log('✅ Authenticated! Subscribing...');
         ws.send(JSON.stringify({ action: 'subscribe', trades: WATCHLIST }));
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        console.log('✅ Subscribed! Up-from-open filter | Daily loss protection | Conservative positions!');
+        const maxPos = getMaxPositionsByWinRate();
+        console.log(`✅ Subscribed! Win rate: ${botParams.winRate}% | Max positions: ${maxPos} | Dynamic scaling active!`);
       }
-      if (msg.T === 'error') {
-        console.error('❌ Alpaca error:', JSON.stringify(msg));
-      }
-      if (msg.T === 't') {
-        await analyzeAndTrade(msg.S, msg.p, msg.s);
-      }
+      if (msg.T === 'error') console.error('❌ Alpaca error:', JSON.stringify(msg));
+      if (msg.T === 't') await analyzeAndTrade(msg.S, msg.p, msg.s);
     }
   });
 
