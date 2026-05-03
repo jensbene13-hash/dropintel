@@ -1,14 +1,5 @@
-// dropintel dashboard v6
+// dropintel dashboard v7 - server side supabase
 import { useState, useEffect, useRef } from 'react';
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_KEY;
-
-const WATCHLIST = [
-  'AAPL','NVDA','MSFT','META','GOOGL','TSLA','AMZN','AMD','CRM','INTC',
-  'JPM','BAC','GS','V','MA','WFC','JNJ','PFE','UNH','LLY',
-  'XOM','CVX','COP','EOG','SPY','QQQ','DIA','IWM','VTI','XLF'
-];
 
 export default function Dashboard() {
   const [portfolio, setPortfolio] = useState(null);
@@ -23,6 +14,12 @@ export default function Dashboard() {
   const [chatLoading, setChatLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const chatEndRef = useRef(null);
+
+  const WATCHLIST = [
+    'AAPL','NVDA','MSFT','META','GOOGL','TSLA','AMZN','AMD','CRM','INTC',
+    'JPM','BAC','GS','V','MA','WFC','JNJ','PFE','UNH','LLY',
+    'XOM','CVX','COP','EOG','SPY','QQQ','DIA','IWM','VTI','XLF'
+  ];
 
   useEffect(() => {
     load();
@@ -42,15 +39,11 @@ export default function Dashboard() {
       ]);
       setPortfolio(acc);
       if (Array.isArray(pos)) setPositions(pos);
-      const tr = await fetch(
-        `${SUPABASE_URL}/rest/v1/trades?select=*&order=created_at.desc&limit=300`,
-        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
-      ).then(r => r.json());
+
+      const tr = await fetch('/api/supabase?path=trades%3Fselect%3D*%26order%3Dcreated_at.desc%26limit%3D300').then(r => r.json());
       if (Array.isArray(tr)) setTrades(tr);
-      const ln = await fetch(
-        `${SUPABASE_URL}/rest/v1/learnings?select=*&order=created_at.desc&limit=1`,
-        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
-      ).then(r => r.json());
+
+      const ln = await fetch('/api/supabase?path=learnings%3Fselect%3D*%26order%3Dcreated_at.desc%26limit%3D1').then(r => r.json());
       if (Array.isArray(ln) && ln.length > 0) setLearnings(ln[0]);
     } catch (e) { console.error(e); }
     setLoading(false);
@@ -75,12 +68,11 @@ export default function Dashboard() {
 Portfolio value: $${parseFloat(portfolio?.portfolio_value || 0).toFixed(2)}
 Daily change: $${(parseFloat(portfolio?.equity || 0) - parseFloat(portfolio?.last_equity || 0)).toFixed(2)}
 Open positions: ${positions.length}
-Today's trades: ${todayTrades.length} | Today's wins: ${todayWins} | Today's losses: ${todayLosses} | Today's P&L: $${todayPL.toFixed(2)}
+Today: ${todayTrades.length} trades | ${todayWins} wins | ${todayLosses} losses | $${todayPL.toFixed(2)} P&L
 All time: ${done.length} trades | ${wins.length} wins | ${done.length - wins.length} losses
 Win rate: ${done.length > 0 ? ((wins.length / done.length) * 100).toFixed(1) : 0}%
 Net P&L: $${pl.toFixed(2)}
 Best symbol: ${learnings?.best_symbol || 'still learning'}
-Best sectors: ${learnings?.best_sectors ? JSON.parse(learnings.best_sectors).join(', ') : 'still learning'}
 Recent trades: ${JSON.stringify(trades.slice(0, 10).map(t => ({ symbol: t.symbol, action: t.action, outcome: t.outcome, pl: t.profit_loss })))}
 Answer in a friendly, clear, conversational tone. Keep responses concise.`;
       const response = await fetch('/api/chat', {
@@ -195,7 +187,7 @@ Answer in a friendly, clear, conversational tone. Keep responses concise.`;
           </div>
 
           <div style={{ ...card, marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>📊 Today's Results</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>📊 Today's Results</div>
             {days.length > 0 && byDay[days[0]] ? (() => {
               const td = byDay[days[0]];
               const wr = (td.wins + td.losses) > 0 ? ((td.wins / (td.wins + td.losses)) * 100).toFixed(0) : 0;
@@ -230,7 +222,7 @@ Answer in a friendly, clear, conversational tone. Keep responses concise.`;
           </div>
 
           <div style={{ ...card, marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>💰 Money Made / Lost</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>💰 Money Made / Lost</div>
             <div style={{ display: 'grid', gap: 8 }}>
               <div style={{ background: '#064e3b', borderRadius: 10, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div><div style={{ fontSize: 10, color: '#6ee7b7', marginBottom: 3 }}>FROM WINS 🟢</div><div style={{ fontSize: 18, fontWeight: 700, color: green }}>+${wins.reduce((s,t)=>s+(parseFloat(t.profit_loss)||0),0).toFixed(2)}</div></div>
@@ -248,7 +240,7 @@ Answer in a friendly, clear, conversational tone. Keep responses concise.`;
           </div>
 
           <div style={{ ...card, marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>🧠 What the Bot Learned</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>🧠 What the Bot Learned</div>
             {learnings ? [
               ['Win Rate', `${parseFloat(learnings.win_rate||0).toFixed(1)}%`, parseFloat(learnings.win_rate)>=50 ? green : red],
               ['Best Stock', learnings.best_symbol||'Still learning...', '#00d4ff'],
@@ -264,7 +256,7 @@ Answer in a friendly, clear, conversational tone. Keep responses concise.`;
           </div>
 
           <div style={card}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>🤖 Bot Status</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>🤖 Bot Status</div>
             {[
               ['Mode', parseFloat(winRate)>=65?'🔥 Full Power (8)':parseFloat(winRate)>=50?'✅ Standard (5)':parseFloat(winRate)>=35?'⚠️ Cautious (3)':'🔴 Learning (2)'],
               ['Win Rate', `${winRate}% - ${parseFloat(winRate)>=50?'Profitable!':'Still learning'}`],
