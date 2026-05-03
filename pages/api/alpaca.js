@@ -1,7 +1,7 @@
 export default async function handler(req, res) {
   const { endpoint } = req.query;
-  const KEY = process.env.ALPACA_KEY;
-  const SECRET = process.env.ALPACA_SECRET;
+  const KEY = process.env.ALPACA_API_KEY;
+  const SECRET = process.env.ALPACA_SECRET_KEY;
 
   try {
     const response = await fetch(`https://paper-api.alpaca.markets/v2/${endpoint}`, {
