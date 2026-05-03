@@ -1,8 +1,6 @@
-// dropintel dashboard v3
+// dropintel dashboard v4
 import { useState, useEffect, useRef } from 'react';
 
-const ALPACA_KEY = process.env.NEXT_PUBLIC_ALPACA_KEY;
-const ALPACA_SECRET = process.env.NEXT_PUBLIC_ALPACA_SECRET;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_KEY;
 
@@ -38,21 +36,20 @@ export default function Dashboard() {
 
   async function load() {
     try {
+      // Route through server-side API proxy to avoid CORS
       const [acc, pos] = await Promise.all([
-        fetch('https://paper-api.alpaca.markets/v2/account', {
-          headers: { 'APCA-API-KEY-ID': ALPACA_KEY, 'APCA-API-SECRET-KEY': ALPACA_SECRET }
-        }).then(r => r.json()),
-        fetch('https://paper-api.alpaca.markets/v2/positions', {
-          headers: { 'APCA-API-KEY-ID': ALPACA_KEY, 'APCA-API-SECRET-KEY': ALPACA_SECRET }
-        }).then(r => r.json()),
+        fetch('/api/alpaca?endpoint=account').then(r => r.json()),
+        fetch('/api/alpaca?endpoint=positions').then(r => r.json()),
       ]);
       setPortfolio(acc);
       if (Array.isArray(pos)) setPositions(pos);
+
       const tr = await fetch(
         `${SUPABASE_URL}/rest/v1/trades?select=*&order=created_at.desc&limit=300`,
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
       ).then(r => r.json());
       if (Array.isArray(tr)) setTrades(tr);
+
       const ln = await fetch(
         `${SUPABASE_URL}/rest/v1/learnings?select=*&order=created_at.desc&limit=1`,
         { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
