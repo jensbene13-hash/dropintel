@@ -1,4 +1,4 @@
-// dropintel dashboard v5 - mobile responsive
+// dropintel dashboard v6
 import { useState, useEffect, useRef } from 'react';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -18,7 +18,7 @@ export default function Dashboard() {
   const [tab, setTab] = useState('overview');
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState([
-    { role: 'assistant', content: "Hi! I'm your trading AI. Ask me anything about the bot!" }
+    { role: 'assistant', content: "Hey! I'm your trading AI. Ask me anything about how the bot is doing!" }
   ]);
   const [chatLoading, setChatLoading] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -66,25 +66,35 @@ export default function Dashboard() {
       const done = trades.filter(t => t.outcome);
       const wins = done.filter(t => t.outcome === 'WIN');
       const pl = done.reduce((s, t) => s + (parseFloat(t.profit_loss) || 0), 0);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const todayTrades = done.filter(t => t.created_at?.startsWith(todayStr));
+      const todayWins = todayTrades.filter(t => t.outcome === 'WIN').length;
+      const todayLosses = todayTrades.filter(t => t.outcome === 'LOSS').length;
+      const todayPL = todayTrades.reduce((s, t) => s + (parseFloat(t.profit_loss) || 0), 0);
       const ctx = `You are the AI assistant for dropintel, an autonomous day trading bot.
 Portfolio value: $${parseFloat(portfolio?.portfolio_value || 0).toFixed(2)}
 Daily change: $${(parseFloat(portfolio?.equity || 0) - parseFloat(portfolio?.last_equity || 0)).toFixed(2)}
 Open positions: ${positions.length}
-Completed trades: ${done.length} | Wins: ${wins.length} | Losses: ${done.length - wins.length}
+Today's trades: ${todayTrades.length} | Today's wins: ${todayWins} | Today's losses: ${todayLosses} | Today's P&L: $${todayPL.toFixed(2)}
+All time: ${done.length} trades | ${wins.length} wins | ${done.length - wins.length} losses
 Win rate: ${done.length > 0 ? ((wins.length / done.length) * 100).toFixed(1) : 0}%
 Net P&L: $${pl.toFixed(2)}
-Best symbol: ${learnings?.best_symbol || 'unknown'}
-Recent trades: ${JSON.stringify(trades.slice(0, 8).map(t => ({ symbol: t.symbol, action: t.action, outcome: t.outcome, pl: t.profit_loss })))}
-Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`;
-      const res = await fetch('/api/chat', {
+Best symbol: ${learnings?.best_symbol || 'still learning'}
+Best sectors: ${learnings?.best_sectors ? JSON.parse(learnings.best_sectors).join(', ') : 'still learning'}
+Recent trades: ${JSON.stringify(trades.slice(0, 10).map(t => ({ symbol: t.symbol, action: t.action, outcome: t.outcome, pl: t.profit_loss })))}
+Answer in a friendly, clear, conversational tone. Keep responses concise.`;
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context: ctx, messages: chatMessages.slice(1).concat([{ role: 'user', content: msg }]) })
+        body: JSON.stringify({
+          context: ctx,
+          messages: chatMessages.slice(1).concat([{ role: 'user', content: msg }])
+        })
       });
-      const d = await res.json();
-      setChatMessages(p => [...p, { role: 'assistant', content: d.reply }]);
+      const data = await response.json();
+      setChatMessages(p => [...p, { role: 'assistant', content: data.reply }]);
     } catch {
-      setChatMessages(p => [...p, { role: 'assistant', content: 'Something went wrong, try again!' }]);
+      setChatMessages(p => [...p, { role: 'assistant', content: 'Something went wrong, please try again!' }]);
     }
     setChatLoading(false);
   }
@@ -113,7 +123,7 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#080b14', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{'@keyframes spin{to{transform:rotate(360deg)}}'}</style>
       <div style={{ textAlign: 'center' }}>
         <div style={{ width: 44, height: 44, border: '3px solid #00d4ff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
         <p style={{ color: '#64748b', fontFamily: 'system-ui', fontSize: 14 }}>Loading dropintel...</p>
@@ -136,19 +146,14 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
         .tabs{display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
         .tabs::-webkit-scrollbar{display:none}
         .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-        .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
         .three-col{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
         .watch-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
         @media(min-width:640px){
           .stat-grid{grid-template-columns:repeat(4,1fr)}
           .watch-grid{grid-template-columns:repeat(3,1fr)}
         }
-        @media(max-width:480px){
-          .two-col{grid-template-columns:1fr}
-        }
       `}</style>
 
-      {/* Header */}
       <div style={{ background: '#0d1117', borderBottom: '1px solid #1e2d3d', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 34, height: 34, background: 'linear-gradient(135deg,#00d4ff,#0066ff)', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>💧</div>
@@ -163,7 +168,6 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
         </div>
       </div>
 
-      {/* Tabs - horizontally scrollable */}
       <div className="tabs" style={{ background: '#0d1117', borderBottom: '1px solid #1e2d3d', padding: '0 16px' }}>
         {['overview','positions','trades','history','watchlist','ai chat'].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{ padding: '11px 16px', fontSize: 13, fontWeight: 500, cursor: 'pointer', border: 'none', background: 'transparent', color: tab === t ? '#00d4ff' : '#64748b', borderBottom: tab === t ? '2px solid #00d4ff' : '2px solid transparent', fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0 }}>
@@ -174,76 +178,66 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
 
       <div style={{ padding: '14px 16px 40px' }}>
 
-        {/* OVERVIEW */}
         {tab === 'overview' && <>
-          {/* 2x2 on mobile, 4x1 on desktop */}
           <div className="stat-grid">
-            <div style={{ background: '#0d1117', border: '1px solid #1e2d3d', borderRadius: 12, padding: '12px 14px' }}>
-              <div style={{ fontSize: 10, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Portfolio</div>
-              <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 2 }}>${portfolioVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              <div style={{ fontSize: 11, color: totalGain >= 0 ? green : red }}>{totalGain >= 0 ? '▲' : '▼'} ${Math.abs(totalGain).toFixed(2)}</div>
-            </div>
-            <div style={{ background: '#0d1117', border: '1px solid #1e2d3d', borderRadius: 12, padding: '12px 14px' }}>
-              <div style={{ fontSize: 10, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Today</div>
-              <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 2, color: dailyChange >= 0 ? green : red }}>{dailyChange >= 0 ? '+' : ''}${dailyChange.toFixed(2)}</div>
-              <div style={{ fontSize: 11, color: dailyChange >= 0 ? green : red }}>{dailyChange >= 0 ? '▲ profit' : '▼ loss'}</div>
-            </div>
-            <div style={{ background: '#0d1117', border: '1px solid #1e2d3d', borderRadius: 12, padding: '12px 14px' }}>
-              <div style={{ fontSize: 10, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Win Rate</div>
-              <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 2, color: parseFloat(winRate) >= 50 ? green : parseFloat(winRate) >= 35 ? '#f59e0b' : red }}>{winRate}%</div>
-              <div style={{ fontSize: 11, color: muted }}>{wins.length}W / {losses.length}L</div>
-            </div>
-            <div style={{ background: '#0d1117', border: '1px solid #1e2d3d', borderRadius: 12, padding: '12px 14px' }}>
-              <div style={{ fontSize: 10, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Positions</div>
-              <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 2 }}>{positions.length}</div>
-              <div style={{ fontSize: 11, color: muted }}>Max {maxPos} {parseFloat(winRate) >= 65 ? '🔥' : parseFloat(winRate) >= 50 ? '✅' : parseFloat(winRate) >= 35 ? '⚠️' : '🔴'}</div>
-            </div>
+            {[
+              { label: 'Portfolio', val: `$${portfolioVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, sub: `${totalGain >= 0 ? '▲' : '▼'} $${Math.abs(totalGain).toFixed(2)}`, subC: totalGain >= 0 ? green : red },
+              { label: 'Today', val: `${dailyChange >= 0 ? '+' : ''}$${dailyChange.toFixed(2)}`, valC: dailyChange >= 0 ? green : red, sub: dailyChange >= 0 ? '▲ profit' : '▼ loss', subC: dailyChange >= 0 ? green : red },
+              { label: 'Win Rate', val: `${winRate}%`, valC: parseFloat(winRate) >= 50 ? green : parseFloat(winRate) >= 35 ? '#f59e0b' : red, sub: `${wins.length}W / ${losses.length}L`, subC: muted },
+              { label: 'Positions', val: `${positions.length}`, sub: `Max ${maxPos} ${parseFloat(winRate) >= 65 ? '🔥' : parseFloat(winRate) >= 50 ? '✅' : parseFloat(winRate) >= 35 ? '⚠️' : '🔴'}`, subC: muted },
+            ].map(s => (
+              <div key={s.label} style={{ background: '#0d1117', border: '1px solid #1e2d3d', borderRadius: 12, padding: '12px 14px' }}>
+                <div style={{ fontSize: 10, color: muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{s.label}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 2, color: s.valC || '#e2e8f0' }}>{s.val}</div>
+                <div style={{ fontSize: 11, color: s.subC }}>{s.sub}</div>
+              </div>
+            ))}
           </div>
 
-          {/* Today's results */}
           <div style={{ ...card, marginBottom: 12 }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>📊 Today's Results</div>
             {days.length > 0 && byDay[days[0]] ? (() => {
               const td = byDay[days[0]];
               const wr = (td.wins + td.losses) > 0 ? ((td.wins / (td.wins + td.losses)) * 100).toFixed(0) : 0;
-              return <>
-                <div className="three-col" style={{ marginBottom: 10 }}>
-                  <div style={{ textAlign: 'center', background: '#064e3b', borderRadius: 10, padding: '12px 8px' }}>
-                    <div style={{ fontSize: 26, fontWeight: 700, color: green }}>{td.wins}</div>
-                    <div style={{ fontSize: 10, color: '#6ee7b7' }}>WINS 🟢</div>
+              return (
+                <>
+                  <div className="three-col" style={{ marginBottom: 10 }}>
+                    <div style={{ textAlign: 'center', background: '#064e3b', borderRadius: 10, padding: '12px 8px' }}>
+                      <div style={{ fontSize: 26, fontWeight: 700, color: green }}>{td.wins}</div>
+                      <div style={{ fontSize: 10, color: '#6ee7b7' }}>WINS 🟢</div>
+                    </div>
+                    <div style={{ textAlign: 'center', background: '#450a0a', borderRadius: 10, padding: '12px 8px' }}>
+                      <div style={{ fontSize: 26, fontWeight: 700, color: red }}>{td.losses}</div>
+                      <div style={{ fontSize: 10, color: '#fca5a5' }}>LOSSES 🔴</div>
+                    </div>
+                    <div style={{ textAlign: 'center', background: td.pl >= 0 ? '#064e3b' : '#450a0a', borderRadius: 10, padding: '12px 8px' }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: td.pl >= 0 ? green : red }}>{td.pl >= 0 ? '+' : ''}${td.pl.toFixed(2)}</div>
+                      <div style={{ fontSize: 10, color: td.pl >= 0 ? '#6ee7b7' : '#fca5a5' }}>P&L 💰</div>
+                    </div>
                   </div>
-                  <div style={{ textAlign: 'center', background: '#450a0a', borderRadius: 10, padding: '12px 8px' }}>
-                    <div style={{ fontSize: 26, fontWeight: 700, color: red }}>{td.losses}</div>
-                    <div style={{ fontSize: 10, color: '#fca5a5' }}>LOSSES 🔴</div>
+                  <div style={{ background: '#080b14', borderRadius: 10, padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, color: '#94a3b8' }}>Win rate today</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: parseFloat(wr) >= 50 ? green : red }}>{wr}%</span>
+                    </div>
+                    <div style={{ background: '#1e2d3d', borderRadius: 4, height: 6 }}>
+                      <div style={{ height: '100%', width: `${wr}%`, background: parseFloat(wr) >= 50 ? green : red, borderRadius: 4 }} />
+                    </div>
                   </div>
-                  <div style={{ textAlign: 'center', background: td.pl >= 0 ? '#064e3b' : '#450a0a', borderRadius: 10, padding: '12px 8px' }}>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: td.pl >= 0 ? green : red }}>{td.pl >= 0 ? '+' : ''}${td.pl.toFixed(2)}</div>
-                    <div style={{ fontSize: 10, color: td.pl >= 0 ? '#6ee7b7' : '#fca5a5' }}>P&L 💰</div>
-                  </div>
-                </div>
-                <div style={{ background: '#080b14', borderRadius: 10, padding: '10px 12px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 12, color: '#94a3b8' }}>Win rate today</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: parseFloat(wr) >= 50 ? green : red }}>{wr}%</span>
-                  </div>
-                  <div style={{ background: '#1e2d3d', borderRadius: 4, height: 6 }}>
-                    <div style={{ height: '100%', width: `${wr}%`, background: parseFloat(wr) >= 50 ? green : red, borderRadius: 4 }} />
-                  </div>
-                </div>
-              </>;
+                </>
+              );
             })() : <div style={{ textAlign: 'center', padding: '20px 0', color: muted }}><div style={{ fontSize: 32, marginBottom: 6 }}>😴</div>No trades yet today</div>}
           </div>
 
-          {/* Money */}
           <div style={{ ...card, marginBottom: 12 }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>💰 Money Made / Lost</div>
             <div style={{ display: 'grid', gap: 8 }}>
               <div style={{ background: '#064e3b', borderRadius: 10, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: 10, color: '#6ee7b7', marginBottom: 3 }}>FROM WINS 🟢</div><div style={{ fontSize: 18, fontWeight: 700, color: green }}>+${wins.reduce((s,t) => s+(parseFloat(t.profit_loss)||0),0).toFixed(2)}</div></div>
+                <div><div style={{ fontSize: 10, color: '#6ee7b7', marginBottom: 3 }}>FROM WINS 🟢</div><div style={{ fontSize: 18, fontWeight: 700, color: green }}>+${wins.reduce((s,t)=>s+(parseFloat(t.profit_loss)||0),0).toFixed(2)}</div></div>
                 <span style={{ fontSize: 24 }}>📈</span>
               </div>
               <div style={{ background: '#450a0a', borderRadius: 10, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div><div style={{ fontSize: 10, color: '#fca5a5', marginBottom: 3 }}>FROM LOSSES 🔴</div><div style={{ fontSize: 18, fontWeight: 700, color: red }}>${losses.reduce((s,t) => s+(parseFloat(t.profit_loss)||0),0).toFixed(2)}</div></div>
+                <div><div style={{ fontSize: 10, color: '#fca5a5', marginBottom: 3 }}>FROM LOSSES 🔴</div><div style={{ fontSize: 18, fontWeight: 700, color: red }}>${losses.reduce((s,t)=>s+(parseFloat(t.profit_loss)||0),0).toFixed(2)}</div></div>
                 <span style={{ fontSize: 24 }}>📉</span>
               </div>
               <div style={{ background: netPL >= 0 ? '#064e3b' : '#450a0a', borderRadius: 10, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -253,7 +247,6 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
             </div>
           </div>
 
-          {/* What bot learned */}
           <div style={{ ...card, marginBottom: 12 }}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>🧠 What the Bot Learned</div>
             {learnings ? [
@@ -261,37 +254,35 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
               ['Best Stock', learnings.best_symbol||'Still learning...', '#00d4ff'],
               ['Best Sectors', learnings.best_sectors ? JSON.parse(learnings.best_sectors).join(', ') : 'Learning...', '#a78bfa'],
               ['Trades Analyzed', String(learnings.total_trades||0), '#e2e8f0'],
-              ['Ideal RSI', `35 – ${learnings.recommended_max_rsi||65}`, '#e2e8f0'],
+              ['Ideal RSI', `35 - ${learnings.recommended_max_rsi||65}`, '#e2e8f0'],
             ].map(([label,val,color]) => (
-              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#080b14', borderRadius: 8, marginBottom: 5 }}>
+              <div key={label} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', background:'#080b14', borderRadius:8, marginBottom:5 }}>
                 <span style={{ color:'#94a3b8', fontSize:13 }}>{label}</span>
                 <span style={{ fontWeight:600, color, fontSize:13 }}>{val}</span>
               </div>
             )) : <div style={{ textAlign:'center', padding:'20px 0', color:muted }}><div style={{ fontSize:32, marginBottom:6 }}>📚</div>Still collecting data...</div>}
           </div>
 
-          {/* Bot status */}
           <div style={card}>
             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>🤖 Bot Status</div>
             {[
               ['Mode', parseFloat(winRate)>=65?'🔥 Full Power (8)':parseFloat(winRate)>=50?'✅ Standard (5)':parseFloat(winRate)>=35?'⚠️ Cautious (3)':'🔴 Learning (2)'],
-              ['Win Rate', `${winRate}% — ${parseFloat(winRate)>=50?'Profitable!':'Still learning'}`],
+              ['Win Rate', `${winRate}% - ${parseFloat(winRate)>=50?'Profitable!':'Still learning'}`],
               ['Net P&L', `${netPL>=0?'+':''}$${netPL.toFixed(2)} from ${done.length} trades`],
               ['Open Now', `${positions.length} of ${maxPos} slots used`],
               ['Watching', `${WATCHLIST.length} stocks`],
             ].map(([label,val]) => (
               <div key={label} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', background:'#080b14', borderRadius:8, marginBottom:5 }}>
                 <span style={{ color:'#94a3b8', fontSize:13 }}>{label}</span>
-                <span style={{ fontWeight:500, fontSize:13, textAlign:'right', maxWidth:'60%' }}>{val}</span>
+                <span style={{ fontWeight:500, fontSize:13, textAlign:'right', maxWidth:'65%' }}>{val}</span>
               </div>
             ))}
           </div>
         </>}
 
-        {/* POSITIONS */}
         {tab === 'positions' && <>
           <div style={{ marginBottom:12, display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:16 }}>📋</span>
+            <span>📋</span>
             <span style={{ fontSize:16, fontWeight:600 }}>Active Positions</span>
             <span style={{ background:'#1e3a5f', color:'#60a5fa', padding:'2px 8px', borderRadius:10, fontSize:11 }}>{positions.length} open</span>
           </div>
@@ -333,10 +324,9 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
           })}
         </>}
 
-        {/* TRADES */}
         {tab === 'trades' && <>
           <div style={{ marginBottom:12, display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:16 }}>🔄</span>
+            <span>🔄</span>
             <span style={{ fontSize:16, fontWeight:600 }}>All Trades</span>
             <span style={{ background:'#1e1a3f', color:'#a78bfa', padding:'2px 8px', borderRadius:10, fontSize:11 }}>{trades.length}</span>
           </div>
@@ -351,10 +341,12 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
                   <div style={{ fontSize:10, color:muted }}>{t.shares} @ ${parseFloat(t.price||0).toFixed(2)}</div>
                 </div>
                 <div style={{ textAlign:'right', flexShrink:0 }}>
-                  {t.outcome ? <>
-                    <span style={{ background:t.outcome==='WIN'?'#064e3b':'#450a0a', color:t.outcome==='WIN'?green:red, padding:'2px 6px', borderRadius:4, fontSize:10, fontWeight:600 }}>{t.outcome==='WIN'?'✓ WIN':'✗ LOSS'}</span>
-                    {t.profit_loss && <div style={{ fontSize:11, color:parseFloat(t.profit_loss)>=0?green:red, marginTop:2 }}>{parseFloat(t.profit_loss)>=0?'+':''}${parseFloat(t.profit_loss).toFixed(2)}</div>}
-                  </> : <span style={{ fontSize:10, color:muted }}>holding...</span>}
+                  {t.outcome ? (
+                    <>
+                      <span style={{ background:t.outcome==='WIN'?'#064e3b':'#450a0a', color:t.outcome==='WIN'?green:red, padding:'2px 6px', borderRadius:4, fontSize:10, fontWeight:600 }}>{t.outcome==='WIN'?'WIN':'LOSS'}</span>
+                      {t.profit_loss && <div style={{ fontSize:11, color:parseFloat(t.profit_loss)>=0?green:red, marginTop:2 }}>{parseFloat(t.profit_loss)>=0?'+':''}${parseFloat(t.profit_loss).toFixed(2)}</div>}
+                    </>
+                  ) : <span style={{ fontSize:10, color:muted }}>holding...</span>}
                 </div>
                 <div style={{ fontSize:10, color:'#475569', textAlign:'right', minWidth:44, flexShrink:0 }}>
                   {t.created_at?.split('T')[1]?.slice(0,5)}<br/>{t.created_at?.split('T')[0]?.slice(5)}
@@ -365,10 +357,9 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
           </div>
         </>}
 
-        {/* HISTORY */}
         {tab === 'history' && <>
           <div style={{ marginBottom:12, display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:16 }}>📅</span>
+            <span>📅</span>
             <span style={{ fontSize:16, fontWeight:600 }}>Daily History</span>
           </div>
           {days.length===0 ? (
@@ -386,7 +377,7 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
                   </div>
                   <div style={{ textAlign:'right' }}>
                     <div style={{ fontSize:18, fontWeight:700, color:d.pl>=0?green:red }}>{d.pl>=0?'+':''}${d.pl.toFixed(2)}</div>
-                    <div style={{ fontSize:11, color:d.pl>=0?green:red }}>{d.pl>=0?'✅ Profit':'❌ Loss'}</div>
+                    <div style={{ fontSize:11, color:d.pl>=0?green:red }}>{d.pl>=0?'✅ Profit day':'❌ Loss day'}</div>
                   </div>
                 </div>
                 <div className="three-col" style={{ marginBottom:8 }}>
@@ -406,10 +397,9 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
           })}
         </>}
 
-        {/* WATCHLIST */}
         {tab === 'watchlist' && <>
           <div style={{ marginBottom:12, display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:16 }}>👁️</span>
+            <span>👁️</span>
             <span style={{ fontSize:16, fontWeight:600 }}>Watchlist</span>
             <span style={{ background:'#1e1a3f', color:'#a78bfa', padding:'2px 8px', borderRadius:10, fontSize:11 }}>{WATCHLIST.length}</span>
           </div>
@@ -425,32 +415,38 @@ Answer simply and clearly. Be honest and encouraging. Keep it short for mobile.`
                 <div key={sym} style={{ background:hasPos?'#0c1a2e':'#0d1117', border:`1px solid ${hasPos?'#1e40af':avoided?'#7f1d1d':'#1e2d3d'}`, borderRadius:10, padding:'10px 12px' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
                     <span style={{ fontWeight:700, fontSize:13 }}>{sym}</span>
-                    {hasPos && <span style={{ background:'#1e3a5f', color:'#93c5fd', fontSize:9, padding:'1px 5px', borderRadius:3 }}>●</span>}
-                    {avoided&&!hasPos && <span style={{ background:'#450a0a', color:'#fca5a5', fontSize:9, padding:'1px 5px', borderRadius:3 }}>✕</span>}
+                    {hasPos && <span style={{ background:'#1e3a5f', color:'#93c5fd', fontSize:9, padding:'1px 5px', borderRadius:3 }}>ACTIVE</span>}
+                    {avoided&&!hasPos && <span style={{ background:'#450a0a', color:'#fca5a5', fontSize:9, padding:'1px 5px', borderRadius:3 }}>AVOID</span>}
                   </div>
-                  {st.length>0 ? <>
-                    <div style={{ display:'flex', gap:6, marginBottom:3 }}>
-                      <span style={{ fontSize:10, color:green }}>✓{sw}W</span>
-                      <span style={{ fontSize:10, color:red }}>✗{sl}L</span>
-                    </div>
-                    <div style={{ fontSize:11, fontWeight:600, color:pl>=0?green:red }}>{pl>=0?'+':''}${pl.toFixed(2)}</div>
-                  </> : <div style={{ fontSize:10, color:'#475569' }}>No trades</div>}
+                  {st.length>0 ? (
+                    <>
+                      <div style={{ display:'flex', gap:6, marginBottom:3 }}>
+                        <span style={{ fontSize:10, color:green }}>{sw}W</span>
+                        <span style={{ fontSize:10, color:red }}>{sl}L</span>
+                      </div>
+                      <div style={{ fontSize:11, fontWeight:600, color:pl>=0?green:red }}>{pl>=0?'+':''}${pl.toFixed(2)}</div>
+                    </>
+                  ) : <div style={{ fontSize:10, color:'#475569' }}>No trades</div>}
                 </div>
               );
             })}
           </div>
         </>}
 
-        {/* AI CHAT */}
         {tab === 'ai chat' && <>
           <div style={{ marginBottom:12, display:'flex', alignItems:'center', gap:8 }}>
-            <span style={{ fontSize:16 }}>🤖</span>
+            <span>🤖</span>
             <span style={{ fontSize:16, fontWeight:600 }}>Ask Your Trading AI</span>
           </div>
           <div style={{ ...card, display:'flex', flexDirection:'column', height:'calc(100vh - 200px)', minHeight:400 }}>
             <div style={{ display:'flex', gap:6, marginBottom:12, flexWrap:'wrap' }}>
-              {['How today?','Why losing?','Best stock?','Real money?'].map(p=>(
-                <button key={p} onClick={()=>setChatInput(p)} style={{ background:'#080b14', border:'1px solid #1e2d3d', color:'#94a3b8', padding:'4px 10px', borderRadius:14, fontSize:11, cursor:'pointer', fontFamily:'inherit' }}>{p}</button>
+              {[
+                'How did we do today?',
+                'Did we learn from our moves today?',
+                'What are we prepared for tomorrow?',
+                'What was the overall profit or loss today?'
+              ].map(p=>(
+                <button key={p} onClick={()=>setChatInput(p)} style={{ background:'#080b14', border:'1px solid #1e2d3d', color:'#94a3b8', padding:'5px 10px', borderRadius:14, fontSize:11, cursor:'pointer', fontFamily:'inherit' }}>{p}</button>
               ))}
             </div>
             <div style={{ flex:1, overflowY:'auto', marginBottom:10 }}>
