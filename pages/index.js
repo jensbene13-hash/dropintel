@@ -187,12 +187,14 @@ Answer in a friendly, clear, conversational tone. Keep responses concise.`;
           </div>
 
           <div style={{ ...card, marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>📊 Today's Results</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>📊 Most Recent Trading Day</div>
             {days.length > 0 && byDay[days[0]] ? (() => {
               const td = byDay[days[0]];
               const wr = (td.wins + td.losses) > 0 ? ((td.wins / (td.wins + td.losses)) * 100).toFixed(0) : 0;
+              const dateLabel = new Date(days[0] + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
               return (
                 <>
+                  <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>{dateLabel}</div>
                   <div className="three-col" style={{ marginBottom: 10 }}>
                     <div style={{ textAlign: 'center', background: '#064e3b', borderRadius: 10, padding: '12px 8px' }}>
                       <div style={{ fontSize: 26, fontWeight: 700, color: green }}>{td.wins}</div>
