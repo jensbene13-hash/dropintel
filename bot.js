@@ -40,7 +40,7 @@ const POSITIVE_KEYWORDS = [
   'innovation', 'launch', 'expansion', 'dividend', 'buyback'
 ];
 
-const STOP_LOSS_PCT = 0.006;
+const STOP_LOSS_PCT = 0.008; // Widened to 0.8% to avoid noise stops
 const COOLDOWN_MS = 3 * 60 * 1000;
 const MAX_PRICE_HISTORY = 100;
 const MIN_TRAILING_STOP = 0.005;
@@ -50,6 +50,8 @@ const MIN_PROFIT_TO_TRAIL = 0.003;
 const AVOID_RESET_HOURS = 24;
 const AVOID_LOSS_THRESHOLD = 5;
 const MAX_DAILY_LOSS_PCT = 0.02;
+const MARKET_OPEN_BUFFER_MINUTES = 15; // Skip first 15 min after open
+const CONSECUTIVE_LOSS_SKIP = 2; // Skip symbol after 2 consecutive losses today
 
 let botParams = {
   maxRSI: 65,
@@ -71,6 +73,7 @@ let tradingLocks = {};
 let todayOpenPrices = {};
 let startingPortfolioValue = null;
 let dailyTradingHalted = false;
+let todaySymbolLosses = {}; // Track consecutive losses per symbol today
 
 const SECTOR_MAP = {
   'AAPL': 'tech', 'NVDA': 'tech', 'MSFT': 'tech', 'META': 'tech', 'GOOGL': 'tech',
@@ -93,27 +96,40 @@ let cooldowns = {};
 let pingInterval = null;
 let isSubscribed = false;
 
-// Dynamic max positions based on proven win rate
-function getMaxPositionsByWinRate() {
-  const winRate = botParams.winRate || 0;
-  if (winRate >= 65) {
-    console.log(`🔥 Win rate ${winRate}% — running at FULL 8 positions!`);
-    return 8;
-  }
-  if (winRate >= 50) {
-    console.log(`✅ Win rate ${winRate}% — running at 5 positions`);
-    return 5;
-  }
-  if (winRate >= 35) {
-    console.log(`⚠️ Win rate ${winRate}% — running conservatively at 3 positions`);
-    return 3;
-  }
-  return 2;
-}
-
 function isSymbolLocked(symbol) { return tradingLocks[symbol] === true; }
 function lockSymbol(symbol) { tradingLocks[symbol] = true; }
 function unlockSymbol(symbol) { tradingLocks[symbol] = false; }
+
+// #1 — Skip first 15 minutes after market open
+function isMarketOpenBuffer() {
+  const now = new Date();
+  const utcHour = now.getUTCHours();
+  const utcMinute = now.getUTCMinutes();
+  const utcTime = utcHour * 60 + utcMinute;
+  const marketOpenTime = 14 * 60 + 30; // 9:30am EST = 14:30 UTC
+  const bufferEnd = marketOpenTime + MARKET_OPEN_BUFFER_MINUTES;
+  if (utcTime >= marketOpenTime && utcTime < bufferEnd) {
+    return true;
+  }
+  return false;
+}
+
+// #2 — Track consecutive losses per symbol today
+function recordSymbolLoss(symbol) {
+  if (!todaySymbolLosses[symbol]) todaySymbolLosses[symbol] = 0;
+  todaySymbolLosses[symbol]++;
+  if (todaySymbolLosses[symbol] >= CONSECUTIVE_LOSS_SKIP) {
+    console.log(`⛔ ${symbol} skipped for rest of day — ${todaySymbolLosses[symbol]} consecutive losses`);
+  }
+}
+
+function recordSymbolWin(symbol) {
+  todaySymbolLosses[symbol] = 0; // Reset on win
+}
+
+function isSkippedToday(symbol) {
+  return (todaySymbolLosses[symbol] || 0) >= CONSECUTIVE_LOSS_SKIP;
+}
 
 function refreshAvoidList() {
   const now = Date.now();
@@ -126,57 +142,6 @@ function refreshAvoidList() {
     console.log(`🔄 Removing from avoid list (24hr reset): ${expired.join(', ')}`);
     botParams.avoidSymbols = botParams.avoidSymbols.filter(s => !expired.includes(s));
     expired.forEach(s => delete botParams.avoidTimestamps[s]);
-  }
-}
-
-async function loadTodayOpenPrices() {
-  try {
-    console.log('📈 Loading today\'s opening prices...');
-    const today = new Date().toISOString().split('T')[0];
-    for (const symbol of WATCHLIST) {
-      const res = await fetch(
-        `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&start=${today}&limit=1`,
-        { headers: { 'APCA-API-KEY-ID': API_KEY, 'APCA-API-SECRET-KEY': SECRET_KEY } }
-      );
-      const data = await res.json();
-      if (data.bars && data.bars.length > 0) {
-        todayOpenPrices[symbol] = data.bars[0].o;
-      }
-    }
-    console.log(`✅ Loaded open prices for ${Object.keys(todayOpenPrices).length} stocks`);
-  } catch (e) {
-    console.error('Failed to load open prices:', e.message);
-  }
-}
-
-function isUpFromOpen(symbol, currentPrice) {
-  const openPrice = todayOpenPrices[symbol];
-  if (!openPrice) return true;
-  return currentPrice > openPrice;
-}
-
-async function checkDailyLossLimit() {
-  try {
-    const res = await fetch(`${BASE_URL}/v2/account`, {
-      headers: { 'APCA-API-KEY-ID': API_KEY, 'APCA-API-SECRET-KEY': SECRET_KEY }
-    });
-    const account = await res.json();
-    const currentValue = parseFloat(account.portfolio_value);
-    if (!startingPortfolioValue) {
-      startingPortfolioValue = currentValue;
-      console.log(`💰 Starting portfolio value: $${startingPortfolioValue.toFixed(2)}`);
-      return;
-    }
-    const dailyLossPct = (startingPortfolioValue - currentValue) / startingPortfolioValue;
-    if (dailyLossPct >= MAX_DAILY_LOSS_PCT && !dailyTradingHalted) {
-      dailyTradingHalted = true;
-      console.log(`🛑 DAILY LOSS LIMIT HIT: Down ${(dailyLossPct*100).toFixed(2)}% — halting new trades!`);
-    } else if (dailyLossPct < MAX_DAILY_LOSS_PCT && dailyTradingHalted) {
-      dailyTradingHalted = false;
-      console.log(`✅ Portfolio recovered — resuming trading`);
-    }
-  } catch (e) {
-    console.error('Failed to check daily loss:', e.message);
   }
 }
 
@@ -469,7 +434,6 @@ async function runLearningAnalysis() {
     const losses = trades.filter(t => t.outcome === 'LOSS');
     const winRate = (wins.length / trades.length * 100).toFixed(2);
     botParams.winRate = parseFloat(winRate);
-
     const winRSI = wins.map(t => parseFloat(t.rsi)).filter(Boolean);
     const avgWinRSI = winRSI.length > 0 ? winRSI.reduce((a, b) => a + b, 0) / winRSI.length : 55;
     const recommendedMaxRSI = Math.min(avgWinRSI + 5, 65);
@@ -553,10 +517,18 @@ async function runLearningAnalysis() {
     if (bestSymbol) botParams.preferredSymbols = [bestSymbol];
     if (bestHours.length > 0) botParams.bestHours = bestHours;
     if (bestSectors.length > 0) botParams.bestSectors = bestSectors;
-    console.log(`✅ Learning: Win rate ${winRate}% | Trades: ${trades.length} | Max positions unlocked: ${maxPos} | Best: ${bestSymbol}`);
+    console.log(`✅ Learning: Win rate ${winRate}% | Trades: ${trades.length} | Max positions: ${maxPos} | Best: ${bestSymbol}`);
   } catch (e) {
     console.error('Learning failed:', e.message);
   }
+}
+
+function getMaxPositionsByWinRate() {
+  const winRate = botParams.winRate || 0;
+  if (winRate >= 65) return 8;
+  if (winRate >= 50) return 5;
+  if (winRate >= 35) return 3;
+  return 2;
 }
 
 function getMarketSession() {
@@ -577,6 +549,57 @@ function getMaxPositions() {
   if (session === 'market') return getMaxPositionsByWinRate();
   if (session === 'pre_market' || session === 'after_hours') return Math.min(getMaxPositionsByWinRate(), 3);
   return 0;
+}
+
+async function loadTodayOpenPrices() {
+  try {
+    console.log('📈 Loading today\'s opening prices...');
+    const today = new Date().toISOString().split('T')[0];
+    for (const symbol of WATCHLIST) {
+      const res = await fetch(
+        `${DATA_URL}/v2/stocks/${symbol}/bars?timeframe=1Day&start=${today}&limit=1`,
+        { headers: { 'APCA-API-KEY-ID': API_KEY, 'APCA-API-SECRET-KEY': SECRET_KEY } }
+      );
+      const data = await res.json();
+      if (data.bars && data.bars.length > 0) {
+        todayOpenPrices[symbol] = data.bars[0].o;
+      }
+    }
+    console.log(`✅ Loaded open prices for ${Object.keys(todayOpenPrices).length} stocks`);
+  } catch (e) {
+    console.error('Failed to load open prices:', e.message);
+  }
+}
+
+function isUpFromOpen(symbol, currentPrice) {
+  const openPrice = todayOpenPrices[symbol];
+  if (!openPrice) return true;
+  return currentPrice > openPrice;
+}
+
+async function checkDailyLossLimit() {
+  try {
+    const res = await fetch(`${BASE_URL}/v2/account`, {
+      headers: { 'APCA-API-KEY-ID': API_KEY, 'APCA-API-SECRET-KEY': SECRET_KEY }
+    });
+    const account = await res.json();
+    const currentValue = parseFloat(account.portfolio_value);
+    if (!startingPortfolioValue) {
+      startingPortfolioValue = currentValue;
+      console.log(`💰 Starting portfolio value: $${startingPortfolioValue.toFixed(2)}`);
+      return;
+    }
+    const dailyLossPct = (startingPortfolioValue - currentValue) / startingPortfolioValue;
+    if (dailyLossPct >= MAX_DAILY_LOSS_PCT && !dailyTradingHalted) {
+      dailyTradingHalted = true;
+      console.log(`🛑 DAILY LOSS LIMIT HIT: Down ${(dailyLossPct*100).toFixed(2)}% — halting new trades!`);
+    } else if (dailyLossPct < MAX_DAILY_LOSS_PCT && dailyTradingHalted) {
+      dailyTradingHalted = false;
+      console.log(`✅ Portfolio recovered — resuming trading`);
+    }
+  } catch (e) {
+    console.error('Failed to check daily loss:', e.message);
+  }
 }
 
 async function loadExistingPositions() {
@@ -762,7 +785,8 @@ function scheduleRefresh() {
       dailyTradingHalted = false;
       startingPortfolioValue = null;
       todayOpenPrices = {};
-      console.log('🔔 Market open — resetting daily protection...');
+      todaySymbolLosses = {}; // Reset consecutive losses at market open
+      console.log('🔔 Market open — resetting daily protection and consecutive loss tracker...');
       loadTodayOpenPrices();
       checkDailyLossLimit();
     }
@@ -814,6 +838,7 @@ async function manageShortPosition(symbol, currentPrice, session) {
     console.log(`🟢 SHORT COVER: ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
     await placeOrder(symbol, position.shares, 'buy', session !== 'market');
     await updateTradeOutcome(symbol, 'WIN', ((position.entryPrice - currentPrice) * position.shares).toFixed(2));
+    recordSymbolWin(symbol);
     delete shortPositions[symbol];
     cooldowns[symbol] = Date.now();
     unlockSymbol(symbol);
@@ -825,6 +850,7 @@ async function manageShortPosition(symbol, currentPrice, session) {
     console.log(`🔴 SHORT STOP LOSS: ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
     await placeOrder(symbol, position.shares, 'buy', session !== 'market');
     await updateTradeOutcome(symbol, 'LOSS', ((position.entryPrice - currentPrice) * position.shares).toFixed(2));
+    recordSymbolLoss(symbol);
     delete shortPositions[symbol];
     cooldowns[symbol] = Date.now();
     unlockSymbol(symbol);
@@ -835,6 +861,7 @@ async function manageShortPosition(symbol, currentPrice, session) {
 async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (isSymbolLocked(symbol)) return;
   if (botParams.avoidSymbols.includes(symbol)) return;
+  if (isSkippedToday(symbol)) return; // #2 skip after 2 consecutive losses today
 
   updateRealtimeData(symbol, currentPrice, tradeSize);
   if (symbol === 'SPY' || symbol === 'QQQ') updateRegime();
@@ -871,6 +898,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
       console.log(`🟢 TRAILING STOP: Selling ${symbol} at $${currentPrice} (+${(pnlPct*100).toFixed(2)}%)`);
       await placeOrder(symbol, position.shares, 'sell', session !== 'market');
       await updateTradeOutcome(symbol, 'WIN', ((currentPrice - position.entryPrice) * position.shares).toFixed(2));
+      recordSymbolWin(symbol);
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
       unlockSymbol(symbol);
@@ -883,6 +911,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
       console.log(`🔴 STOP LOSS: Selling ${symbol} at $${currentPrice} (${(pnlPct*100).toFixed(2)}%)`);
       await placeOrder(symbol, position.shares, 'sell', session !== 'market');
       await updateTradeOutcome(symbol, 'LOSS', ((currentPrice - position.entryPrice) * position.shares).toFixed(2));
+      recordSymbolLoss(symbol);
       delete positions[symbol];
       cooldowns[symbol] = Date.now();
       unlockSymbol(symbol);
@@ -895,6 +924,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
   if (maxPositions === 0) return;
   if (isOnCooldown(symbol)) return;
   if (dailyTradingHalted) return;
+  if (isMarketOpenBuffer()) return; // #1 skip first 15 min
 
   const totalPositions = Object.keys(positions).length + Object.keys(shortPositions).length;
   if (currentRegime === 'neutral') return;
@@ -909,6 +939,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 
     const qualifyingSymbols = WATCHLIST.filter(s => {
       if (botParams.avoidSymbols.includes(s)) return false;
+      if (isSkippedToday(s)) return false;
       if (positions[s] || shortPositions[s]) return false;
       if (isOnCooldown(s)) return false;
       if (!isUpFromOpen(s, realtimePrices[s]?.slice(-1)[0] || 0)) return false;
@@ -934,7 +965,7 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
     const upFromOpen = openPrice ? ((currentPrice - openPrice) / openPrice * 100).toFixed(2) : 'N/A';
 
     lockSymbol(symbol);
-    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | Rank: ${getFullSignalScore(symbol)} | +${upFromOpen}% from open | 🐂 | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions} [WR:${botParams.winRate}%]`);
+    console.log(`📈 LONG: ${symbol} at $${currentPrice} | RSI: ${indicators.rsi.toFixed(2)} | Signal: ${signalScore}/5 | +${upFromOpen}% from open | 🐂 | Stop: ${(trailingStopPct*100).toFixed(2)}% | Size: $${maxTrade} | Pos: ${totalPositions + 1}/${maxPositions} [WR:${botParams.winRate}%]`);
     await placeOrder(symbol, shares, 'buy', session !== 'market');
     positions[symbol] = {
       entryPrice: currentPrice,
@@ -986,8 +1017,9 @@ async function analyzeAndTrade(symbol, currentPrice, tradeSize) {
 }
 
 function startBot() {
-  console.log('🤖 Trading bot — Dynamic Positions by Win Rate | Up From Open | All Upgrades...');
+  console.log('🤖 Trading bot — 15min Buffer | 2-Loss Skip | 0.8% Stop | All Upgrades...');
   isSubscribed = false;
+
   const session = getMarketSession();
   console.log(`📅 Current session: ${session}`);
 
@@ -1022,8 +1054,7 @@ function startBot() {
       }
       if (msg.T === 'subscription') {
         isSubscribed = true;
-        const maxPos = getMaxPositionsByWinRate();
-        console.log(`✅ Subscribed! Win rate: ${botParams.winRate}% | Max positions: ${maxPos} | Dynamic scaling active!`);
+        console.log('✅ Subscribed! 15min buffer | 2-loss skip | 0.8% stop | Dynamic positions active!');
       }
       if (msg.T === 'error') console.error('❌ Alpaca error:', JSON.stringify(msg));
       if (msg.T === 't') await analyzeAndTrade(msg.S, msg.p, msg.s);
